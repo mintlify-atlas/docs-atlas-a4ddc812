@@ -1,0 +1,220 @@
+{
+  "projectType": "data-platform",
+  "projectName": "Mage",
+  "projectDescription": "Open-source data pipeline tool for building, running, and orchestrating data transformations and integrations.",
+  "theme": "maple",
+  "primaryColor": "#04ea79",
+  "lightColor": "#048b48",
+  "darkColor": "#040604",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Getting Started",
+            "pages": [
+              "introduction",
+              "quickstart",
+              "installation",
+              "core-concepts"
+            ]
+          },
+          {
+            "group": "Pipelines",
+            "pages": [
+              "pipelines/overview",
+              "pipelines/creating-pipelines",
+              "pipelines/blocks",
+              "pipelines/execution",
+              "pipelines/scheduling",
+              "pipelines/dynamic-blocks"
+            ]
+          },
+          {
+            "group": "Data Integrations",
+            "pages": [
+              "integrations/overview",
+              "integrations/sources",
+              "integrations/destinations",
+              "integrations/custom-integrations"
+            ]
+          },
+          {
+            "group": "Development",
+            "pages": [
+              "development/notebook-ui",
+              "development/writing-code",
+              "development/testing",
+              "development/debugging",
+              "development/variables"
+            ]
+          },
+          {
+            "group": "Orchestration",
+            "pages": [
+              "orchestration/overview",
+              "orchestration/triggers",
+              "orchestration/sensors",
+              "orchestration/backfills",
+              "orchestration/monitoring"
+            ]
+          },
+          {
+            "group": "Deployment",
+            "pages": [
+              "deployment/overview",
+              "deployment/docker",
+              "deployment/kubernetes",
+              "deployment/cloud-providers",
+              "deployment/configuration"
+            ]
+          },
+          {
+            "group": "Advanced Features",
+            "pages": [
+              "advanced/dbt-integration",
+              "advanced/streaming",
+              "advanced/spark-integration",
+              "advanced/ai-features",
+              "advanced/custom-executors"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "CLI Commands",
+            "pages": [
+              "api/cli/init",
+              "api/cli/start",
+              "api/cli/run",
+              "api/cli/clean"
+            ]
+          },
+          {
+            "group": "Python API",
+            "pages": [
+              "api/python/pipeline",
+              "api/python/block",
+              "api/python/data-loader",
+              "api/python/data-transformer",
+              "api/python/data-exporter",
+              "api/python/variable-manager"
+            ]
+          },
+          {
+            "group": "REST API",
+            "pages": [
+              "api/rest/authentication",
+              "api/rest/pipelines",
+              "api/rest/blocks",
+              "api/rest/pipeline-runs",
+              "api/rest/triggers"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Integrations",
+        "groups": [
+          {
+            "group": "Data Sources",
+            "pages": [
+              "integrations/sources/overview",
+              "integrations/sources/databases",
+              "integrations/sources/apis",
+              "integrations/sources/cloud-storage",
+              "integrations/sources/streaming"
+            ]
+          },
+          {
+            "group": "Data Destinations",
+            "pages": [
+              "integrations/destinations/overview",
+              "integrations/destinations/databases",
+              "integrations/destinations/data-warehouses",
+              "integrations/destinations/cloud-storage",
+              "integrations/destinations/streaming"
+            ]
+          },
+          {
+            "group": "Infrastructure",
+            "pages": [
+              "integrations/compute/overview",
+              "integrations/compute/spark",
+              "integrations/compute/dask",
+              "integrations/compute/kubernetes"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Guides",
+        "groups": [
+          {
+            "group": "Tutorials",
+            "pages": [
+              "guides/first-pipeline",
+              "guides/etl-workflow",
+              "guides/streaming-pipeline",
+              "guides/dbt-pipeline",
+              "guides/ml-pipeline"
+            ]
+          },
+          {
+            "group": "Best Practices",
+            "pages": [
+              "guides/best-practices/pipeline-design",
+              "guides/best-practices/error-handling",
+              "guides/best-practices/performance",
+              "guides/best-practices/testing",
+              "guides/best-practices/security"
+            ]
+          },
+          {
+            "group": "Migration",
+            "pages": [
+              "guides/migration/from-airflow",
+              "guides/migration/from-dagster",
+              "guides/migration/from-prefect"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Visual notebook-style pipeline builder with Python, SQL, and R support",
+    "50+ prebuilt data source and destination connectors",
+    "Built-in orchestration and scheduling with cron support",
+    "Native dbt integration for SQL transformations",
+    "Real-time streaming pipelines with Kafka, RabbitMQ, and more",
+    "Dynamic block execution for parallel processing",
+    "Spark and distributed compute integration",
+    "AI-assisted code generation and debugging",
+    "Version control and CI/CD integration",
+    "Multi-environment deployment (Docker, Kubernetes, cloud platforms)"
+  ],
+  "publicApiSurface": [
+    "mage init - Initialize a new Mage project",
+    "mage start - Start the Mage server and UI",
+    "mage run - Execute a pipeline programmatically",
+    "Pipeline.create() - Create a new pipeline",
+    "Pipeline.get() - Retrieve an existing pipeline",
+    "Pipeline.execute() - Run a pipeline",
+    "Block.create() - Create a new block",
+    "Block.execute() - Execute a block",
+    "@data_loader - Decorator for data loading blocks",
+    "@transformer - Decorator for transformation blocks",
+    "@data_exporter - Decorator for data export blocks",
+    "@sensor - Decorator for sensor blocks",
+    "@custom - Decorator for custom blocks",
+    "VariableManager - Manage pipeline variables and state",
+    "ExecutorFactory - Create pipeline and block executors",
+    "DataIntegration - Run data integration pipelines",
+    "REST API endpoints for pipelines, blocks, triggers, and runs"
+  ]
+}
