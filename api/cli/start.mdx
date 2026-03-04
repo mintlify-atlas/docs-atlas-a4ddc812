@@ -1,0 +1,145 @@
+---
+title: 'mage start'
+description: 'Start the Mage server and UI'
+---
+
+## Overview
+
+The `mage start` command launches the Mage web server and user interface, making your project accessible through a web browser.
+
+## Signature
+
+```bash
+mage start [PROJECT_PATH] [OPTIONS]
+```
+
+## Arguments
+
+<ParamField path="project_path" type="string" default="current directory">
+  Path of the Mage project to be loaded. Defaults to the current working directory.
+</ParamField>
+
+## Options
+
+<ParamField path="--host" type="string" default="localhost">
+  Specify the host address to bind the server to.
+</ParamField>
+
+<ParamField path="--port" type="string" default="6789">
+  Specify the port number for the server.
+</ParamField>
+
+<ParamField path="--manage-instance" type="string" default="0">
+  Enable instance management. Set to `1` to enable.
+</ParamField>
+
+<ParamField path="--dbt-docs-instance" type="string" default="0">
+  Enable dbt docs instance. Set to `1` to enable.
+</ParamField>
+
+<ParamField path="--instance-type" type="string" default="server_and_scheduler">
+  Specify the instance type. Can be overridden by the `MAGE_INSTANCE_TYPE` environment variable.
+</ParamField>
+
+<ParamField path="--project-type" type="string" default="standalone">
+  Create project of this type if it does not exist. Options are:
+  - `main` - Main project for multi-project setups
+  - `sub` - Sub-project that connects to a main project
+  - `standalone` - Independent project (default)
+</ParamField>
+
+<ParamField path="--cluster-type" type="string" default="None">
+  Type of instance to create for workspace management.
+</ParamField>
+
+<ParamField path="--project-uuid" type="string" default="None">
+  Set project UUID for the repo that is being started.
+</ParamField>
+
+## Examples
+
+<CodeGroup>
+
+```bash Basic usage
+mage start
+```
+
+```bash Specify project path
+mage start /path/to/my_project
+```
+
+```bash Custom host and port
+mage start --host 0.0.0.0 --port 8080
+```
+
+```bash With instance management
+mage start --manage-instance 1
+```
+
+```bash Different instance type
+mage start --instance-type scheduler
+```
+
+```bash Full configuration
+mage start my_project --host 0.0.0.0 --port 8080 --project-type standalone
+```
+
+</CodeGroup>
+
+## Behavior
+
+When you run `mage start`, the command:
+
+1. Sets the repository path to the specified project directory (converted to absolute path)
+2. Initializes global settings and database connections
+3. Starts the web server on the specified host and port
+4. Launches the Mage UI accessible through a web browser
+5. Keeps running until manually stopped (Ctrl+C)
+
+## Environment Variables
+
+The `--instance-type` option can be overridden by setting the `MAGE_INSTANCE_TYPE` environment variable.
+
+## Implementation Details
+
+The command is implemented in `mage_ai/cli/main.py:121-157`:
+
+```python
+@app.command()
+def start(
+    project_path: str = START_PROJECT_PATH_DEFAULT,
+    host: str = START_HOST_DEFAULT,
+    port: str = START_PORT_DEFAULT,
+    manage_instance: str = START_MANAGE_INSTANCE_DEFAULT,
+    dbt_docs_instance: str = START_DBT_DOCS_INSTANCE_DEFAULT,
+    instance_type: str = START_INSTANCE_TYPE_DEFAULT,
+    project_type: str = START_PROJECT_TYPE_DEFAULT,
+    cluster_type: str = START_CLUSTER_TYPE_DEFAULT,
+    project_uuid: str = START_PROJECT_UUID_DEFAULT,
+):
+    """
+    Start Mage server and UI.
+    """
+    from mage_ai.settings.repo import set_repo_path
+
+    # Set repo_path before intializing the DB so that we can get correct db_connection_url
+    project_path = os.path.abspath(project_path)
+    set_repo_path(project_path)
+
+    from mage_ai.server.server import start_server
+    from mage_ai.server.setup import initialize_globals
+
+    initialize_globals()
+
+    start_server(
+        host=host,
+        port=port,
+        project=project_path,
+        manage=manage_instance == '1',
+        dbt_docs=dbt_docs_instance == '1',
+        instance_type=os.getenv(ENV_VAR_INSTANCE_TYPE, instance_type),
+        project_type=project_type,
+        cluster_type=cluster_type,
+        project_uuid=project_uuid,
+    )
+```

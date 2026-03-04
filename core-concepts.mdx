@@ -1,0 +1,579 @@
+---
+title: Core Concepts
+description: Understand the fundamental concepts of Mage - pipelines, blocks, data loaders, transformers, and data exporters
+---
+
+Mage is built around a simple, modular architecture that makes building data pipelines intuitive and maintainable. This guide covers the core concepts you need to know.
+
+## Pipelines
+
+A **pipeline** is a directed acyclic graph (DAG) of blocks that process data. Pipelines define the workflow from data ingestion to export.
+
+### Pipeline Types
+
+Mage supports several pipeline types:
+
+<CardGroup cols={2}>
+  <Card title="Standard (Batch)" icon="database">
+    Traditional ETL pipelines that run on a schedule or manually. Process data in batches.
+  </Card>
+  
+  <Card title="Streaming" icon="water">
+    Real-time data processing pipelines for continuous data streams.
+  </Card>
+  
+  <Card title="Integration" icon="link">
+    Pre-built connectors for syncing data between sources and destinations.
+  </Card>
+  
+  <Card title="DBT" icon="cube">
+    Run dbt models directly inside Mage with full observability.
+  </Card>
+</CardGroup>
+
+### Creating a Pipeline
+
+Pipelines are created with the `Pipeline.create()` method or via the CLI:
+
+```python
+from mage_ai.data_preparation.models.pipeline import Pipeline, PipelineType
+
+pipeline = Pipeline.create(
+    'my_pipeline',
+    repo_path='/path/to/project',
+    pipeline_type=PipelineType.PYTHON,
+    description='My data pipeline',
+    tags=['etl', 'production']
+)
+```
+
+Or using the CLI:
+
+```bash
+mage init my_project
+cd my_project
+# Pipelines are created through the UI or programmatically
+```
+
+### Pipeline Structure
+
+Pipelines are stored in your project directory:
+
+```
+my_project/
+├── pipelines/
+│   └── my_pipeline/
+│       ├── metadata.yaml      # Pipeline configuration
+│       ├── __init__.py
+│       └── requirements.txt   # Pipeline-specific dependencies
+└── io_config.yaml             # Data source configurations
+```
+
+The `metadata.yaml` file contains:
+
+```yaml
+blocks:
+- uuid: load_data
+  type: data_loader
+  upstream_blocks: []
+  downstream_blocks: [transform_data]
+- uuid: transform_data
+  type: transformer
+  upstream_blocks: [load_data]
+  downstream_blocks: [export_data]
+- uuid: export_data
+  type: data_exporter
+  upstream_blocks: [transform_data]
+  downstream_blocks: []
+created_at: '2026-03-04 12:00:00.000000+00:00'
+name: my_pipeline
+type: python
+uuid: my_pipeline
+```
+
+## Blocks
+
+**Blocks** are the building units of pipelines. Each block performs a specific function in your data workflow. Blocks are Python, SQL, or R files that execute code and pass data to downstream blocks.
+
+### Block Types
+
+Mage has several block types, each serving a different purpose:
+
+<Tabs>
+  <Tab title="Data Loader">
+    ### Data Loader
+
+    Data loaders **import data** from external sources into your pipeline.
+
+    ```python
+    import pandas as pd
+
+    if 'data_loader' not in globals():
+        from mage_ai.data_preparation.decorators import data_loader
+
+    @data_loader
+    def load_data(*args, **kwargs):
+        """
+        Load data from an API endpoint
+        """
+        url = 'https://api.example.com/data'
+        response = requests.get(url)
+        return pd.DataFrame(response.json())
+    ```
+
+    **Use cases:**
+    - Load data from APIs
+    - Read from databases (PostgreSQL, MySQL, BigQuery, etc.)
+    - Import from files (CSV, Parquet, JSON)
+    - Fetch from cloud storage (S3, GCS, Azure Blob)
+  </Tab>
+
+  <Tab title="Transformer">
+    ### Transformer
+
+    Transformers **process and manipulate data** from upstream blocks.
+
+    ```python
+    from pandas import DataFrame
+
+    if 'transformer' not in globals():
+        from mage_ai.data_preparation.decorators import transformer
+    if 'test' not in globals():
+        from mage_ai.data_preparation.decorators import test
+
+    @transformer
+    def transform_data(df: DataFrame, *args, **kwargs) -> DataFrame:
+        """
+        Clean and transform the data
+        """
+        # Remove duplicates
+        df = df.drop_duplicates()
+        
+        # Filter out invalid rows
+        df = df[df['amount'] > 0]
+        
+        # Add computed column
+        df['total_with_tax'] = df['amount'] * 1.08
+        
+        return df
+
+    @test
+    def test_output(df: DataFrame) -> None:
+        """
+        Test that transformation worked correctly
+        """
+        assert df is not None, 'Output is undefined'
+        assert df['amount'].min() > 0, 'Invalid amounts found'
+        assert 'total_with_tax' in df.columns, 'Missing computed column'
+    ```
+
+    **Use cases:**
+    - Clean and validate data
+    - Perform calculations and aggregations
+    - Filter and reshape data
+    - Join multiple datasets
+  </Tab>
+
+  <Tab title="Data Exporter">
+    ### Data Exporter
+
+    Data exporters **write data** to external destinations.
+
+    ```python
+    from pandas import DataFrame
+    from mage_ai.settings.repo import get_repo_path
+    from mage_ai.io.config import ConfigFileLoader
+    from mage_ai.io.postgres import Postgres
+    from os import path
+
+    if 'data_exporter' not in globals():
+        from mage_ai.data_preparation.decorators import data_exporter
+
+    @data_exporter
+    def export_data(df: DataFrame, **kwargs) -> None:
+        """
+        Export data to PostgreSQL database
+        """
+        schema_name = 'public'
+        table_name = 'processed_data'
+        config_path = path.join(get_repo_path(), 'io_config.yaml')
+        config_profile = 'default'
+
+        with Postgres.with_config(
+            ConfigFileLoader(config_path, config_profile)
+        ) as loader:
+            loader.export(
+                df,
+                schema_name,
+                table_name,
+                index=False,
+                if_exists='replace',
+            )
+    ```
+
+    **Use cases:**
+    - Write to databases
+    - Export to cloud storage
+    - Send to APIs
+    - Save to local files
+  </Tab>
+
+  <Tab title="Other Block Types">
+    ### Other Block Types
+
+    #### Sensor
+    Wait for external conditions before proceeding:
+
+    ```python
+    from mage_ai.data_preparation.decorators import sensor
+
+    @sensor
+    def check_file_exists(*args, **kwargs):
+        """
+        Wait until a file exists before proceeding
+        """
+        import os
+        return os.path.exists('/data/input.csv')
+    ```
+
+    #### Custom
+    Execute arbitrary Python code:
+
+    ```python
+    from mage_ai.data_preparation.decorators import custom
+
+    @custom
+    def send_notification(*args, **kwargs):
+        """
+        Send a Slack notification
+        """
+        # Your custom logic here
+        pass
+    ```
+
+    #### Callback
+    Run code after a block completes (success or failure):
+
+    ```python
+    from mage_ai.data_preparation.decorators import callback
+
+    @callback
+    def on_success(*args, **kwargs):
+        print('Block executed successfully!')
+
+    @callback('on_failure')
+    def on_failure(*args, **kwargs):
+        print('Block failed!')
+    ```
+  </Tab>
+</Tabs>
+
+### Block Structure
+
+Blocks are stored as Python files in your project:
+
+```
+my_project/
+├── data_loaders/
+│   └── load_api_data.py
+├── transformers/
+│   └── clean_data.py
+└── data_exporters/
+    └── export_to_postgres.py
+```
+
+### Block Decorators
+
+Mage uses Python decorators to define block functionality:
+
+| Decorator | Purpose | Return Type |
+|-----------|---------|-------------|
+| `@data_loader` | Load data from external sources | DataFrame, dict, list, or any serializable object |
+| `@transformer` | Transform data from upstream blocks | DataFrame, dict, list, or any serializable object |
+| `@data_exporter` | Export data to external destinations | None (or optionally return data) |
+| `@test` | Test block output | None (raises AssertionError on failure) |
+| `@sensor` | Check external conditions | bool (True to proceed) |
+| `@custom` | Execute custom logic | Any |
+| `@callback` | Run after block completion | None |
+
+### Block Dependencies
+
+Blocks are connected through **upstream** and **downstream** relationships:
+
+```python
+# Transformer with multiple upstream blocks
+from pandas import DataFrame
+
+if 'transformer' not in globals():
+    from mage_ai.data_preparation.decorators import transformer
+
+@transformer
+def join_data(
+    customers: DataFrame,  # From first upstream block
+    orders: DataFrame,     # From second upstream block
+    *args, **kwargs
+) -> DataFrame:
+    """
+    Join customer and order data
+    """
+    return customers.merge(
+        orders,
+        left_on='customer_id',
+        right_on='id',
+        how='left'
+    )
+```
+
+The pipeline executes blocks in **topological order** based on dependencies.
+
+## Data Flow
+
+Data flows through your pipeline automatically:
+
+<Steps>
+  <Step title="Block execution">
+    When a block runs, it:
+    1. Receives output from upstream blocks as function arguments
+    2. Executes your code
+    3. Returns data to downstream blocks
+  </Step>
+
+  <Step title="Data persistence">
+    Block outputs are automatically saved to:
+    ```
+    my_project/.mage_data/
+    └── my_pipeline/
+        └── load_data/
+            └── output_0.parquet
+    ```
+  </Step>
+
+  <Step title="Data retrieval">
+    Downstream blocks automatically load the saved data:
+    - No manual file handling required
+    - Data is cached between runs
+    - Supports multiple output variables
+  </Step>
+</Steps>
+
+### Multiple Outputs
+
+Blocks can return multiple outputs:
+
+```python
+@data_loader
+def load_data(*args, **kwargs):
+    """
+    Return multiple dataframes
+    """
+    customers = pd.read_csv('customers.csv')
+    orders = pd.read_csv('orders.csv')
+    
+    # Return tuple for multiple outputs
+    return customers, orders
+```
+
+Downstream blocks receive them as separate arguments:
+
+```python
+@transformer
+def transform(customers: DataFrame, orders: DataFrame, *args) -> DataFrame:
+    return customers.merge(orders, on='customer_id')
+```
+
+## Variables and Configuration
+
+### Global Variables
+
+Pass variables to your pipeline:
+
+```python
+@data_loader
+def load_data(*args, **kwargs):
+    # Access global variables
+    env = kwargs.get('env', 'dev')
+    api_key = kwargs.get('api_key')
+    
+    url = f'https://api.{env}.example.com/data'
+    return fetch_data(url, api_key)
+```
+
+Set variables in the UI or via CLI:
+
+```bash
+mage run my_project my_pipeline --runtime-vars '{"env": "prod", "api_key": "xxx"}'
+```
+
+### Block Configuration
+
+Store block-specific config in `io_config.yaml`:
+
+```yaml io_config.yaml
+default:
+  POSTGRES_HOST: localhost
+  POSTGRES_PORT: 5432
+  POSTGRES_USER: mage
+  POSTGRES_PASSWORD: password
+  POSTGRES_DB: analytics
+```
+
+Access in blocks:
+
+```python
+from mage_ai.settings.repo import get_repo_path
+from mage_ai.io.config import ConfigFileLoader
+from os import path
+
+config_path = path.join(get_repo_path(), 'io_config.yaml')
+config = ConfigFileLoader(config_path, 'default')
+
+host = config['POSTGRES_HOST']
+```
+
+## Testing
+
+Every block should include tests:
+
+```python
+if 'test' not in globals():
+    from mage_ai.data_preparation.decorators import test
+
+@test
+def test_output(output: DataFrame, *args) -> None:
+    """
+    Validate block output
+    """
+    assert output is not None, 'Output is undefined'
+    assert len(output) > 0, 'Output is empty'
+    assert output['amount'].min() >= 0, 'Negative amounts found'
+    assert not output['id'].duplicated().any(), 'Duplicate IDs found'
+```
+
+Run tests:
+
+```bash
+mage run my_project my_pipeline --test
+```
+
+## Execution Modes
+
+### Sequential Execution
+
+Blocks run one at a time in dependency order:
+
+```python
+pipeline.execute_sync(
+    global_vars={'env': 'prod'},
+    run_tests=True
+)
+```
+
+### Parallel Execution
+
+Independent blocks run in parallel:
+
+```python
+await pipeline.execute(
+    global_vars={'env': 'prod'},
+    parallel=True,
+    run_tests=True
+)
+```
+
+### Block-Level Execution
+
+Run a single block:
+
+```bash
+mage run my_project my_pipeline --block-uuid transform_data
+```
+
+## Advanced Features
+
+### Dynamic Blocks
+
+Generate blocks dynamically at runtime:
+
+```python
+@data_loader
+def load_data(*args, **kwargs):
+    # Return list of items to process
+    return [
+        {'date': '2024-01-01', 'region': 'US'},
+        {'date': '2024-01-02', 'region': 'EU'},
+        {'date': '2024-01-03', 'region': 'ASIA'},
+    ]
+
+@transformer
+def process_partition(data: dict, *args) -> DataFrame:
+    # This block runs once per item
+    date = data['date']
+    region = data['region']
+    return fetch_and_process(date, region)
+```
+
+### Conditional Blocks
+
+Execute blocks conditionally:
+
+```python
+@transformer
+def should_process(df: DataFrame, *args) -> bool:
+    # Return True to execute downstream blocks
+    return len(df) > 1000
+```
+
+### SQL Blocks
+
+Write SQL queries directly:
+
+```sql
+-- data_loader
+SELECT 
+    customer_id,
+    SUM(amount) as total_spent,
+    COUNT(*) as order_count
+FROM orders
+WHERE created_at >= '2024-01-01'
+GROUP BY customer_id
+```
+
+## Best Practices
+
+<CardGroup cols={2}>
+  <Card title="Keep blocks focused" icon="bullseye">
+    Each block should do one thing well. Small, reusable blocks are easier to test and maintain.
+  </Card>
+  
+  <Card title="Write tests" icon="check">
+    Always include `@test` functions to validate your data quality and business logic.
+  </Card>
+  
+  <Card title="Use descriptive names" icon="tag">
+    Name blocks clearly: `load_customer_data`, not `load_data_1`.
+  </Card>
+  
+  <Card title="Document your code" icon="book">
+    Add docstrings to explain what each block does and any important assumptions.
+  </Card>
+</CardGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Quick Start" icon="rocket" href="/quickstart">
+    Build your first pipeline
+  </Card>
+  
+  <Card title="API Reference" icon="code" href="/api/cli/init">
+    Explore the complete API
+  </Card>
+  
+  <Card title="Examples" icon="lightbulb" href="/guides/first-pipeline">
+    Browse real-world examples
+  </Card>
+  
+  <Card title="Deployment" icon="cloud" href="/deployment/overview">
+    Deploy to production
+  </Card>
+</CardGroup>

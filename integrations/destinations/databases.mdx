@@ -1,0 +1,423 @@
+---
+title: 'Database Destinations'
+description: 'Export data to PostgreSQL, MySQL, MSSQL, Oracle, MongoDB, and other databases'
+icon: 'server'
+---
+
+Mage supports exporting data to traditional relational and NoSQL databases. These destinations are ideal for operational data stores, application databases, and systems requiring ACID compliance.
+
+## Supported Databases
+
+<CardGroup cols={2}>
+  <Card title="PostgreSQL" icon="elephant">
+    Open-source relational database with advanced features
+  </Card>
+  <Card title="MySQL" icon="database">
+    Popular open-source relational database
+  </Card>
+  <Card title="MSSQL" icon="microsoft">
+    Microsoft SQL Server for enterprise applications
+  </Card>
+  <Card title="Oracle" icon="circle-o">
+    Enterprise-grade relational database
+  </Card>
+  <Card title="MongoDB" icon="leaf">
+    Document-oriented NoSQL database
+  </Card>
+  <Card title="ClickHouse" icon="bolt">
+    Columnar database for analytical queries
+  </Card>
+  <Card title="Teradata" icon="server">
+    Enterprise data warehouse platform
+  </Card>
+</CardGroup>
+
+## PostgreSQL
+
+### Configuration
+
+<CodeGroup>
+```yaml Basic Configuration
+host: postgres.example.com
+port: 5432
+username: mage_user
+password: your_password
+database: production
+schema: public
+table: users
+```
+
+```python Python Configuration
+from mage_integrations.destinations.postgresql import PostgreSQL
+
+config = {
+    'host': 'localhost',
+    'port': 5432,
+    'username': 'postgres',
+    'password': 'password',
+    'database': 'mydb',
+    'schema': 'public',
+    'table': 'my_table',
+}
+
+postgres = PostgreSQL(config=config)
+```
+</CodeGroup>
+
+### Features
+
+- **UPSERT support** - Insert or update with `ON CONFLICT` clause
+- **Array types** - Native support for PostgreSQL arrays
+- **JSONB columns** - Store complex objects as JSONB
+- **Primary keys** - Automatic primary key detection
+- **Custom schemas** - Support for multiple schemas
+
+### Unique Constraints
+
+Handle duplicate records with PostgreSQL's native UPSERT:
+
+```yaml
+unique_constraints:
+  - user_id
+  - email
+unique_conflict_method: UPDATE  # or IGNORE
+```
+
+This generates SQL like:
+
+```sql
+INSERT INTO users (user_id, email, name)
+VALUES (1, 'user@example.com', 'John')
+ON CONFLICT (user_id, email)
+DO UPDATE SET name = EXCLUDED.name, _mage_updated_at = EXCLUDED._mage_updated_at;
+```
+
+### Data Type Mapping
+
+| Python Type | PostgreSQL Type |
+|------------|----------------|
+| str | TEXT |
+| int | BIGINT |
+| float | DOUBLE PRECISION |
+| bool | BOOLEAN |
+| datetime | TIMESTAMP |
+| dict | JSONB |
+| list | ARRAY |
+
+## MySQL
+
+### Configuration
+
+<CodeGroup>
+```yaml Basic Configuration
+host: mysql.example.com
+port: 3306
+username: mage_user
+password: your_password
+database: production
+table: users
+```
+
+```yaml SSH Tunnel
+host: mysql.internal.com
+port: 3306
+username: db_user
+password: db_password
+database: mydb
+table: users
+connection_method: ssh_tunnel
+ssh_host: bastion.example.com
+ssh_port: 22
+ssh_username: ssh_user
+ssh_password: ssh_password
+```
+</CodeGroup>
+
+### Features
+
+- **SSH tunneling** - Connect through bastion hosts
+- **ON DUPLICATE KEY UPDATE** - Upsert functionality
+- **Custom connection parameters** - Advanced MySQL options
+- **Multiple storage engines** - InnoDB, MyISAM, etc.
+
+### Unique Constraints
+
+MySQL uses `ON DUPLICATE KEY UPDATE` for upserts:
+
+```yaml
+unique_constraints:
+  - id
+unique_conflict_method: UPDATE
+```
+
+Generates:
+
+```sql
+INSERT INTO users (id, name, email)
+VALUES (1, 'John', 'john@example.com') AS new
+ON DUPLICATE KEY UPDATE
+  name = new.name,
+  email = new.email,
+  _mage_updated_at = new._mage_updated_at;
+```
+
+## Microsoft SQL Server (MSSQL)
+
+### Configuration
+
+<CodeGroup>
+```yaml Windows Authentication
+host: mssql.example.com
+port: 1433
+username: domain\\user
+password: your_password
+database: production
+schema: dbo
+table: users
+authentication: Windows
+```
+
+```yaml SQL Authentication
+host: mssql.example.com
+port: 1433
+username: sa
+password: your_password
+database: production
+schema: dbo
+table: users
+authentication: SQL
+driver: ODBC Driver 17 for SQL Server
+```
+</CodeGroup>
+
+### Features
+
+- **MERGE statement** - Native upsert support
+- **Windows authentication** - Active Directory integration
+- **Custom schemas** - Support for non-dbo schemas
+- **Azure SQL Database** - Cloud database support
+
+### Merge Operations
+
+MSSQL uses the `MERGE` statement for upserts:
+
+```sql
+MERGE INTO dbo.users AS a
+USING (VALUES (1, 'John', 'john@example.com')) AS b(id, name, email)
+ON a.id = b.id
+WHEN MATCHED THEN
+  UPDATE SET a.name = b.name, a.email = b.email
+WHEN NOT MATCHED THEN
+  INSERT (id, name, email) VALUES (b.id, b.name, b.email);
+```
+
+## Oracle Database
+
+### Configuration
+
+```yaml
+host: oracle.example.com
+port: 1521
+username: mage_user
+password: your_password
+database: ORCL  # Service name or SID
+schema: MAGE_SCHEMA
+table: USERS
+```
+
+### Features
+
+- **Service name or SID** - Flexible connection options
+- **Schema support** - Multi-schema environments
+- **Enterprise features** - Partitioning, compression, etc.
+
+## MongoDB
+
+### Configuration
+
+<CodeGroup>
+```yaml Connection String
+connection_string: mongodb://username:password@host:27017/
+db_name: production
+table: users  # Collection name
+```
+
+```yaml MongoDB Atlas
+connection_string: mongodb+srv://user:pass@cluster.mongodb.net/
+db_name: myapp
+table: events
+```
+</CodeGroup>
+
+### Features
+
+- **Document model** - Store complex nested data
+- **Flexible schema** - No predefined schema required
+- **MongoDB Atlas** - Cloud database support
+- **Connection pooling** - Efficient connection management
+
+### Document Structure
+
+Mage automatically converts Python dictionaries to MongoDB documents:
+
+```python
+@data_exporter
+def export_to_mongodb(data, *args, **kwargs):
+    # Each row becomes a MongoDB document
+    return [
+        {
+            'user_id': 1,
+            'name': 'John Doe',
+            'metadata': {
+                'signup_date': '2024-01-01',
+                'tags': ['premium', 'verified']
+            }
+        }
+    ]
+```
+
+## ClickHouse
+
+### Configuration
+
+```yaml
+sqlalchemy_url: clickhouse+http://user:password@host:8123/database
+table: events
+```
+
+### Features
+
+- **Columnar storage** - Optimized for analytical queries
+- **High compression** - Efficient storage
+- **Real-time analytics** - Fast query performance
+- **SQLAlchemy support** - Standard SQL interface
+
+## Teradata
+
+### Configuration
+
+```yaml
+host: teradata.example.com
+username: mage_user
+password: your_password
+database: production
+table: users
+```
+
+### Features
+
+- **Parallel processing** - Distributed query execution
+- **Enterprise scale** - Handle massive datasets
+- **ANSI SQL** - Standard SQL compliance
+
+## Common Features
+
+### Automatic Table Creation
+
+Mage automatically creates tables based on your data schema:
+
+```python
+@data_exporter
+def export_data(data, *args, **kwargs):
+    # Mage infers schema from your data
+    return pd.DataFrame({
+        'id': [1, 2, 3],
+        'name': ['Alice', 'Bob', 'Charlie'],
+        'created_at': pd.to_datetime(['2024-01-01', '2024-01-02', '2024-01-03']),
+        'metadata': [{'key': 'value'}, {'key': 'value2'}, None]
+    })
+```
+
+### Schema Evolution
+
+When new columns appear in your data, Mage automatically alters the table:
+
+```sql
+ALTER TABLE users ADD COLUMN new_field TEXT;
+```
+
+### Lowercase Column Names
+
+Force lowercase column names for consistency:
+
+```yaml
+use_lowercase: true
+```
+
+## Performance Tips
+
+<Accordion title="Batch Size Optimization">
+  Adjust batch size based on your database capabilities:
+  
+  ```python
+  # In your data exporter block
+  BATCH_SIZE = 1000  # Rows per batch
+  
+  @data_exporter
+  def export_data(data, *args, **kwargs):
+      for i in range(0, len(data), BATCH_SIZE):
+          batch = data[i:i + BATCH_SIZE]
+          yield batch
+  ```
+</Accordion>
+
+<Accordion title="Connection Pooling">
+  Reuse database connections for better performance:
+  
+  ```yaml
+  conn_kwargs:
+    pool_size: 5
+    max_overflow: 10
+    pool_timeout: 30
+  ```
+</Accordion>
+
+<Accordion title="Index Optimization">
+  Create indexes on frequently queried columns:
+  
+  ```sql
+  -- After initial load
+  CREATE INDEX idx_user_email ON users(email);
+  CREATE INDEX idx_created_at ON users(created_at);
+  ```
+</Accordion>
+
+## Example: PostgreSQL Export
+
+```python
+from mage_ai.settings.repo import get_repo_path
+from mage_ai.io.config import ConfigFileLoader
+from mage_ai.io.postgres import Postgres
+from pandas import DataFrame
+
+if 'data_exporter' not in globals():
+    from mage_ai.data_preparation.decorators import data_exporter
+
+@data_exporter
+def export_to_postgres(df: DataFrame, **kwargs) -> None:
+    """
+    Export data to PostgreSQL database.
+    """
+    config_path = os.path.join(get_repo_path(), 'io_config.yaml')
+    config_profile = 'default'
+
+    with Postgres.with_config(ConfigFileLoader(config_path, config_profile)) as loader:
+        loader.export(
+            df,
+            schema_name='public',
+            table_name='users',
+            index=False,
+            if_exists='replace',  # or 'append', 'fail'
+        )
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Data Warehouses" icon="warehouse" href="/integrations/destinations/data-warehouses">
+    Learn about BigQuery, Snowflake, and Redshift
+  </Card>
+  <Card title="Cloud Storage" icon="cloud" href="/integrations/destinations/cloud-storage">
+    Export to S3, GCS, and Delta Lake
+  </Card>
+</CardGroup>

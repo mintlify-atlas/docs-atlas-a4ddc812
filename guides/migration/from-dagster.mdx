@@ -1,0 +1,737 @@
+---
+title: Migrating from Dagster to Mage
+description: Complete guide to migrating your Dagster pipelines to Mage
+---
+
+## Overview
+
+This guide helps you migrate from Dagster to Mage. Both tools emphasize data assets and testability, but Mage provides a more visual, notebook-style development experience with simpler configuration.
+
+## Key Concept Mapping
+
+### Core Components
+
+| Dagster | Mage | Notes |
+|---------|------|-------|
+| Asset | Block | Self-contained data transformation units |
+| Op | Block | Can be combined in a pipeline |
+| Job | Pipeline | Workflow definition with blocks |
+| Graph | Pipeline | Visual DAG representation |
+| Resource | IO Config | Database connections, API clients |
+| IOManager | Data Exporter | Handles output persistence |
+| Sensor | Sensor Block | Monitors external conditions |
+| Schedule | Trigger | Time-based execution |
+| Partition | Dynamic Block | Process multiple data chunks |
+| Repository | Project | Collection of pipelines |
+
+### Data & Execution
+
+| Dagster | Mage | Notes |
+|---------|------|-------|
+| AssetMaterialization | Block Output | Automatic data persistence |
+| DagsterType | Type Hints | Use Python type hints for validation |
+| Config Schema | Block Configuration | YAML-based configuration |
+| Run | Pipeline Run | Execution instance with metadata |
+| Executor | Executor Type | Local, K8s, ECS, Cloud Run |
+
+## Migration Steps
+
+### 1. Converting Assets to Blocks
+
+<CodeGroup>
+```python Dagster - Software-Defined Assets
+from dagster import asset, AssetIn
+import pandas as pd
+
+@asset
+def raw_users() -> pd.DataFrame:
+    """
+    Load raw user data from database.
+    """
+    return pd.read_sql(
+        "SELECT * FROM users",
+        con="postgresql://localhost/db"
+    )
+
+@asset
+def clean_users(raw_users: pd.DataFrame) -> pd.DataFrame:
+    """
+    Clean and transform user data.
+    """
+    df = raw_users.copy()
+    df['full_name'] = df['first_name'] + ' ' + df['last_name']
+    return df[df['is_active']]
+
+@asset(
+    ins={"users": AssetIn("clean_users")}
+)
+def user_analytics(users: pd.DataFrame) -> pd.DataFrame:
+    """
+    Calculate user analytics.
+    """
+    return users.groupby('signup_date').agg({
+        'user_id': 'count',
+        'revenue': 'sum'
+    })
+```
+
+```python Mage Block: raw_users.py
+from mage_ai.io.postgres import Postgres
+from pandas import DataFrame
+
+if 'data_loader' not in globals():
+    from mage_ai.data_preparation.decorators import data_loader
+
+@data_loader
+def load_data(*args, **kwargs) -> DataFrame:
+    """
+    Load raw user data from database.
+    """
+    query = 'SELECT * FROM users'
+    
+    return Postgres.with_config({
+        'host': 'localhost',
+        'database': 'db',
+        'port': 5432,
+    }).load(query)
+
+
+@test
+def test_output(output, *args) -> None:
+    """
+    Test that data was loaded successfully.
+    """
+    assert output is not None, 'No data returned'
+    assert len(output) > 0, 'DataFrame is empty'
+```
+
+```python Mage Block: clean_users.py
+from pandas import DataFrame
+
+if 'transformer' not in globals():
+    from mage_ai.data_preparation.decorators import transformer
+
+@transformer
+def transform(data: DataFrame, *args, **kwargs) -> DataFrame:
+    """
+    Clean and transform user data.
+    Args:
+        data: Output from upstream block (raw_users)
+    """
+    df = data.copy()
+    df['full_name'] = df['first_name'] + ' ' + df['last_name']
+    return df[df['is_active']]
+
+
+@test
+def test_output(output, *args) -> None:
+    """
+    Validate cleaned data.
+    """
+    assert 'full_name' in output.columns
+    assert output['is_active'].all()
+```
+
+```python Mage Block: user_analytics.py
+from pandas import DataFrame
+
+if 'transformer' not in globals():
+    from mage_ai.data_preparation.decorators import transformer
+
+@transformer
+def transform(data: DataFrame, *args, **kwargs) -> DataFrame:
+    """
+    Calculate user analytics.
+    Args:
+        data: Output from upstream block (clean_users)
+    """
+    return data.groupby('signup_date').agg({
+        'user_id': 'count',
+        'revenue': 'sum'
+    }).reset_index()
+```
+
+```yaml Mage Pipeline: metadata.yaml
+blocks:
+- uuid: raw_users
+  type: data_loader
+  language: python
+  upstream_blocks: []
+  downstream_blocks:
+  - clean_users
+  
+- uuid: clean_users
+  type: transformer
+  language: python
+  upstream_blocks:
+  - raw_users
+  downstream_blocks:
+  - user_analytics
+  
+- uuid: user_analytics
+  type: transformer
+  language: python
+  upstream_blocks:
+  - clean_users
+  downstream_blocks: []
+
+name: user_analytics_pipeline
+type: python
+```
+</CodeGroup>
+
+### 2. Configuration and Resources
+
+<CodeGroup>
+```python Dagster - Resources & Config
+from dagster import resource, op, job, ConfigurableResource
+from pydantic import Field
+
+class DatabaseResource(ConfigurableResource):
+    host: str
+    port: int = Field(default=5432)
+    database: str
+    
+    def get_connection(self):
+        return connect(self.host, self.port, self.database)
+
+@op
+def load_data(context, database: DatabaseResource):
+    conn = database.get_connection()
+    return conn.execute("SELECT * FROM users")
+
+@job(
+    resource_defs={
+        "database": DatabaseResource(
+            host="localhost",
+            database="prod"
+        )
+    }
+)
+def my_job():
+    load_data()
+```
+
+```python Mage - IO Config
+# In io_config.yaml
+default:
+  POSTGRES_CONNECT_TIMEOUT: 10
+  POSTGRES_DBNAME: "{{ env_var('POSTGRES_DBNAME') }}"
+  POSTGRES_HOST: localhost
+  POSTGRES_PORT: 5432
+  POSTGRES_USER: "{{ env_var('POSTGRES_USER') }}"
+  POSTGRES_PASSWORD: "{{ env_var('POSTGRES_PASSWORD') }}"
+
+production:
+  POSTGRES_HOST: prod-db.company.com
+  POSTGRES_DBNAME: analytics
+  POSTGRES_PORT: 5432
+```
+
+```python Mage Block - Using Config
+from mage_ai.io.postgres import Postgres
+from mage_ai.io.config import ConfigFileLoader
+from pandas import DataFrame
+
+if 'data_loader' not in globals():
+    from mage_ai.data_preparation.decorators import data_loader
+
+@data_loader
+def load_data(*args, **kwargs) -> DataFrame:
+    """
+    Load data using io_config profiles.
+    """
+    config_path = kwargs.get('configuration', {}).get('config_path', 'default')
+    config_profile = kwargs.get('configuration', {}).get('config_profile', 'default')
+    
+    query = 'SELECT * FROM users'
+    
+    with ConfigFileLoader(config_path, config_profile) as config:
+        return Postgres.with_config(config).load(query)
+```
+
+```yaml Block Configuration
+# In pipeline metadata.yaml
+blocks:
+- uuid: load_data
+  type: data_loader
+  configuration:
+    config_path: io_config.yaml
+    config_profile: production  # Use production profile
+```
+</CodeGroup>
+
+### 3. Partitions and Dynamic Execution
+
+<CodeGroup>
+```python Dagster - Partitioned Assets
+from dagster import asset, DailyPartitionsDefinition
+import pandas as pd
+
+daily_partition = DailyPartitionsDefinition(start_date="2024-01-01")
+
+@asset(partitions_def=daily_partition)
+def daily_sales(context) -> pd.DataFrame:
+    """
+    Process sales for a specific partition.
+    """
+    partition_date = context.partition_key
+    return pd.read_sql(
+        f"SELECT * FROM sales WHERE date = '{partition_date}'",
+        con=get_connection()
+    )
+
+@asset(partitions_def=daily_partition)
+def aggregated_sales(context, daily_sales: pd.DataFrame) -> pd.DataFrame:
+    """
+    Aggregate sales data.
+    """
+    return daily_sales.groupby('product_id').agg({'amount': 'sum'})
+```
+
+```python Mage - Dynamic Blocks
+# Block: generate_partitions.py
+from datetime import datetime, timedelta
+
+if 'data_loader' not in globals():
+    from mage_ai.data_preparation.decorators import data_loader
+
+@data_loader
+def load_data(*args, **kwargs) -> list:
+    """
+    Generate list of partitions to process.
+    Each dict becomes inputs for downstream blocks.
+    """
+    start_date = datetime(2024, 1, 1)
+    end_date = datetime.now()
+    
+    partitions = []
+    current_date = start_date
+    
+    while current_date <= end_date:
+        partitions.append({
+            'partition_date': current_date.strftime('%Y-%m-%d'),
+            'partition_key': current_date.strftime('%Y%m%d')
+        })
+        current_date += timedelta(days=1)
+    
+    return partitions
+```
+
+```python Mage Block: daily_sales.py
+from pandas import DataFrame
+from mage_ai.io.postgres import Postgres
+
+if 'data_loader' not in globals():
+    from mage_ai.data_preparation.decorators import data_loader
+
+@data_loader
+def load_data(*args, **kwargs) -> DataFrame:
+    """
+    Process sales for a specific partition.
+    """
+    # Access partition data from upstream dynamic block
+    partition_date = kwargs.get('partition_date')
+    
+    query = f"""
+        SELECT * FROM sales 
+        WHERE date = '{partition_date}'
+    """
+    
+    return Postgres.with_config({...}).load(query)
+```
+
+```yaml Dynamic Configuration
+blocks:
+- uuid: generate_partitions
+  type: data_loader
+  configuration:
+    dynamic: true  # Enable dynamic execution
+    reduce_output: false
+  downstream_blocks:
+  - daily_sales
+  
+- uuid: daily_sales
+  type: data_loader
+  # This block runs once per partition
+  upstream_blocks:
+  - generate_partitions
+  downstream_blocks:
+  - aggregated_sales
+  
+- uuid: aggregated_sales
+  type: transformer
+  configuration:
+    reduce_output: true  # Combine results from all partitions
+```
+</CodeGroup>
+
+### 4. Scheduling and Sensors
+
+<Tabs>
+  <Tab title="Dagster">
+    ```python
+    from dagster import schedule, sensor, RunRequest
+    
+    @schedule(
+        cron_schedule="0 2 * * *",
+        job=my_job,
+        execution_timezone="America/New_York"
+    )
+    def daily_schedule(context):
+        return RunRequest(
+            run_config={
+                "ops": {
+                    "load_data": {
+                        "config": {"date": context.scheduled_execution_time}
+                    }
+                }
+            }
+        )
+    
+    @sensor(job=my_job)
+    def s3_sensor(context):
+        files = check_for_new_files()
+        for file in files:
+            yield RunRequest(
+                run_key=file,
+                run_config={"file_path": file}
+            )
+    ```
+  </Tab>
+  <Tab title="Mage">
+    ```python
+    # Create schedule via UI or API
+    from mage_ai.orchestration.db.models.schedules import PipelineSchedule
+    
+    PipelineSchedule.create(
+        name='daily_at_2am',
+        pipeline_uuid='user_analytics_pipeline',
+        schedule_type='time',
+        schedule_interval='0 2 * * *',
+        status='active',
+        variables={
+            'env': 'production',
+            'date': '{{ execution_date }}',
+        },
+    )
+    ```
+    
+    For sensors:
+    ```python
+    # Create sensor block
+    from mage_ai.io.s3 import S3
+    
+    if 'sensor' not in globals():
+        from mage_ai.data_preparation.decorators import sensor
+    
+    @sensor
+    def check_s3_files(*args, **kwargs) -> bool:
+        """
+        Check for new files in S3.
+        """
+        s3 = S3()
+        files = s3.list_objects('my-bucket', prefix='data/')
+        
+        # Store file list for downstream processing
+        if files:
+            kwargs['context']['files'] = files
+            return True
+        return False
+    ```
+  </Tab>
+</Tabs>
+
+### 5. Testing
+
+<CodeGroup>
+```python Dagster - Tests
+from dagster import materialize, asset
+import pytest
+
+@asset
+def my_asset():
+    return [1, 2, 3]
+
+def test_my_asset():
+    result = materialize([my_asset])
+    assert result.success
+    
+    materialization = result.asset_materializations_for_node("my_asset")[0]
+    assert materialization is not None
+
+def test_asset_output():
+    from my_assets import my_asset
+    output = my_asset()
+    assert len(output) == 3
+```
+
+```python Mage - Inline Tests
+# In the same file as your block
+from pandas import DataFrame
+
+if 'transformer' not in globals():
+    from mage_ai.data_preparation.decorators import transformer
+if 'test' not in globals():
+    from mage_ai.data_preparation.decorators import test
+
+@transformer
+def transform(data: DataFrame, *args, **kwargs) -> DataFrame:
+    """
+    Transform data.
+    """
+    return data[data['amount'] > 0]
+
+
+@test
+def test_output(output, *args) -> None:
+    """
+    Test runs automatically after block execution.
+    """
+    assert output is not None, 'Output is undefined'
+    assert len(output) > 0, 'No data after filtering'
+    assert (output['amount'] > 0).all(), 'Found negative amounts'
+
+
+@test
+def test_schema(output, *args) -> None:
+    """
+    Validate output schema.
+    """
+    required_columns = ['user_id', 'amount', 'date']
+    for col in required_columns:
+        assert col in output.columns, f'Missing column: {col}'
+```
+</CodeGroup>
+
+<Note>
+Mage tests run automatically after each block execution during development and in production. Failed tests prevent downstream blocks from executing.
+</Note>
+
+### 6. Data Quality and Validation
+
+<CodeGroup>
+```python Dagster - Asset Checks
+from dagster import asset, AssetCheckResult, asset_check
+
+@asset
+def users_table():
+    return load_users()
+
+@asset_check(asset=users_table)
+def check_users_not_empty(asset_value):
+    return AssetCheckResult(
+        passed=len(asset_value) > 0,
+        description="Users table should not be empty"
+    )
+
+@asset_check(asset=users_table)
+def check_no_null_emails(asset_value):
+    null_count = asset_value['email'].isnull().sum()
+    return AssetCheckResult(
+        passed=null_count == 0,
+        metadata={"null_count": null_count}
+    )
+```
+
+```python Mage - Test Functions
+from pandas import DataFrame
+
+if 'data_loader' not in globals():
+    from mage_ai.data_preparation.decorators import data_loader
+if 'test' not in globals():
+    from mage_ai.data_preparation.decorators import test
+
+@data_loader
+def load_data(*args, **kwargs) -> DataFrame:
+    """
+    Load users table.
+    """
+    return load_users()
+
+
+@test
+def test_not_empty(output, *args) -> None:
+    """
+    Users table should not be empty.
+    """
+    assert len(output) > 0, 'Users table is empty'
+
+
+@test
+def test_no_null_emails(output, *args) -> None:
+    """
+    Check for null email addresses.
+    """
+    null_count = output['email'].isnull().sum()
+    assert null_count == 0, f'Found {null_count} null emails'
+
+
+@test
+def test_email_format(output, *args) -> None:
+    """
+    Validate email format.
+    """
+    import re
+    email_pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+    
+    invalid = output[~output['email'].str.match(email_pattern)]
+    assert len(invalid) == 0, f'Found {len(invalid)} invalid emails'
+```
+</CodeGroup>
+
+## Advanced Features
+
+### Multi-Asset Pipelines
+
+<Tabs>
+  <Tab title="Dagster">
+    ```python
+    from dagster import multi_asset, AssetOut
+    
+    @multi_asset(
+        outs={
+            "users": AssetOut(),
+            "orders": AssetOut(),
+        }
+    )
+    def load_tables(context):
+        users_df = load_users()
+        orders_df = load_orders()
+        return users_df, orders_df
+    ```
+  </Tab>
+  <Tab title="Mage">
+    ```python
+    # Mage blocks output multiple variables automatically
+    from pandas import DataFrame
+    from typing import Tuple
+    
+    if 'data_loader' not in globals():
+        from mage_ai.data_preparation.decorators import data_loader
+    
+    @data_loader
+    def load_data(*args, **kwargs) -> Tuple[DataFrame, DataFrame]:
+        """
+        Load multiple tables.
+        Returns tuple of dataframes.
+        """
+        users_df = load_users()
+        orders_df = load_orders()
+        return users_df, orders_df
+    ```
+    
+    Access in downstream blocks:
+    ```python
+    @transformer
+    def transform(data_1: DataFrame, data_2: DataFrame, *args, **kwargs):
+        # data_1 = users_df
+        # data_2 = orders_df
+        return data_1.merge(data_2, on='user_id')
+    ```
+  </Tab>
+</Tabs>
+
+### Retries and Error Handling
+
+<CodeGroup>
+```python Dagster - Retry Policy
+from dagster import op, Backoff, RetryPolicy
+
+@op(
+    retry_policy=RetryPolicy(
+        max_retries=3,
+        delay=30,
+        backoff=Backoff.EXPONENTIAL,
+    )
+)
+def flaky_operation():
+    # May fail and retry
+    pass
+```
+
+```yaml Mage - Retry Config
+# In pipeline metadata.yaml
+blocks:
+- uuid: flaky_operation
+  type: data_loader
+  retry_config:
+    retries: 3
+    delay: 30  # seconds
+    exponential_backoff: true
+    retry_on_exceptions:
+    - TimeoutError
+    - ConnectionError
+```
+
+```python Mage - Block-Level Error Handling
+from pandas import DataFrame
+import time
+
+if 'data_loader' not in globals():
+    from mage_ai.data_preparation.decorators import data_loader
+
+@data_loader
+def load_data(*args, **kwargs) -> DataFrame:
+    """
+    Load data with custom retry logic.
+    """
+    max_retries = 3
+    retry_delay = 30
+    
+    for attempt in range(max_retries):
+        try:
+            return fetch_data_from_api()
+        except Exception as e:
+            if attempt < max_retries - 1:
+                print(f'Attempt {attempt + 1} failed: {e}. Retrying...')
+                time.sleep(retry_delay * (2 ** attempt))  # Exponential backoff
+            else:
+                raise
+```
+</CodeGroup>
+
+## Migration Checklist
+
+- [ ] **Map Assets**: Identify all Dagster assets and ops
+- [ ] **Review Dependencies**: Document asset dependencies and data flow
+- [ ] **Extract Configurations**: Export resource configs and run configs
+- [ ] **Create Pipelines**: Build equivalent Mage pipelines
+- [ ] **Convert Logic**: Transform each asset into a Mage block
+- [ ] **Migrate Tests**: Convert asset checks to Mage test functions
+- [ ] **Set Up IO Configs**: Configure database and API connections
+- [ ] **Configure Schedules**: Set up triggers for automated runs
+- [ ] **Handle Partitions**: Implement dynamic blocks for partitioned assets
+- [ ] **Test Execution**: Run full pipeline tests
+- [ ] **Set Up Monitoring**: Configure alerts and notifications
+- [ ] **Document Pipelines**: Add descriptions and documentation
+
+## Common Patterns
+
+### Pattern 1: Software-Defined Assets
+
+**Dagster**: Assets with dependencies via function parameters
+**Mage**: Blocks with upstream/downstream configuration in YAML
+
+### Pattern 2: Dynamic Partitioning
+
+**Dagster**: PartitionsDefinition with partitioned assets
+**Mage**: Dynamic blocks that generate partition metadata
+
+### Pattern 3: Multi-Output Operations
+
+**Dagster**: Multi-assets with multiple AssetOuts
+**Mage**: Blocks returning tuples or lists, accessed by position in downstream blocks
+
+## Additional Resources
+
+- [Mage Blocks Documentation](/pipelines/blocks)
+- [Dynamic Blocks](/pipelines/dynamic-blocks)
+- [Testing in Mage](/development/testing)
+- [IO Configuration](/deployment/configuration)
+
+## Getting Help
+
+- [Mage Community Slack](https://www.mage.ai/chat)
+- [GitHub Discussions](https://github.com/mage-ai/mage-ai/discussions)
+- [Documentation](https://docs.mage.ai)

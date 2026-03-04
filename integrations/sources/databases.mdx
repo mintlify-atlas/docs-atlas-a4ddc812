@@ -1,0 +1,543 @@
+---
+title: 'Database Sources'
+description: 'Connect to SQL and NoSQL databases to extract data with Mage'
+---
+
+Mage provides native integrations with popular SQL and NoSQL databases, supporting full table replication, incremental sync, and change data capture (CDC) for real-time updates.
+
+## Supported Databases
+
+<CardGroup cols={3}>
+  <Card title="PostgreSQL" icon="elephant">
+    RDBMS with CDC support via logical replication
+  </Card>
+  <Card title="MySQL" icon="database">
+    Popular open-source relational database
+  </Card>
+  <Card title="Snowflake" icon="snowflake">
+    Cloud data warehouse platform
+  </Card>
+  <Card title="BigQuery" icon="google">
+    Google Cloud serverless data warehouse
+  </Card>
+  <Card title="Redshift" icon="aws">
+    AWS cloud data warehouse
+  </Card>
+  <Card title="MongoDB" icon="leaf">
+    NoSQL document database
+  </Card>
+  <Card title="MSSQL" icon="microsoft">
+    Microsoft SQL Server
+  </Card>
+  <Card title="Oracle" icon="database">
+    Enterprise relational database
+  </Card>
+  <Card title="Teradata" icon="database">
+    Enterprise data warehouse
+  </Card>
+</CardGroup>
+
+## PostgreSQL
+
+Extract data from PostgreSQL with support for full table, incremental, and log-based (CDC) replication.
+
+### Configuration
+
+```json
+{
+  "host": "postgres.example.com",
+  "port": 5432,
+  "database": "production",
+  "schema": "public",
+  "username": "mage_user",
+  "password": "${env:POSTGRES_PASSWORD}",
+  "start_date": "2024-01-01T00:00:00Z"
+}
+```
+
+### Log-Based Replication (CDC)
+
+Configure PostgreSQL for real-time change data capture:
+
+```json
+{
+  "host": "postgres.example.com",
+  "database": "production",
+  "schema": "public",
+  "username": "replication_user",
+  "password": "${env:POSTGRES_PASSWORD}",
+  "replication_slot": "mage_slot",
+  "publication_name": "mage_pub",
+  "logical_poll_total_seconds": 60
+}
+```
+
+<Accordion title="Setup PostgreSQL CDC">
+1. Enable logical replication in `postgresql.conf`:
+```sql
+wal_level = logical
+max_replication_slots = 4
+max_wal_senders = 4
+```
+
+2. Create a publication:
+```sql
+CREATE PUBLICATION mage_pub FOR ALL TABLES;
+```
+
+3. Create a replication slot:
+```sql
+SELECT pg_create_logical_replication_slot('mage_slot', 'pgoutput');
+```
+
+4. Grant necessary permissions:
+```sql
+GRANT SELECT ON ALL TABLES IN SCHEMA public TO mage_user;
+GRANT USAGE ON SCHEMA public TO mage_user;
+ALTER USER mage_user WITH REPLICATION;
+```
+</Accordion>
+
+### Example Usage
+
+<CodeGroup>
+```python Python
+from mage_integrations.sources.postgresql import PostgreSQL
+
+config = {
+    'host': 'localhost',
+    'database': 'mydb',
+    'schema': 'public',
+    'username': 'user',
+    'password': 'pass'
+}
+
+source = PostgreSQL(config=config)
+
+# Discover tables
+catalog = source.discover()
+print(f"Found {len(catalog.streams)} tables")
+
+# Test connection
+source.test_connection()
+```
+
+```yaml YAML Pipeline
+data_loader:
+  type: postgres
+  connection:
+    host: postgres.example.com
+    port: 5432
+    database: production
+    schema: public
+    username: ${env:DB_USER}
+    password: ${env:DB_PASSWORD}
+  streams:
+    - users
+    - orders
+    - products
+  replication_method: INCREMENTAL
+  replication_key: updated_at
+```
+</CodeGroup>
+
+## MySQL
+
+Connect to MySQL databases with support for SSH tunneling and multiple connection methods.
+
+### Configuration
+
+```json
+{
+  "host": "mysql.example.com",
+  "port": 3306,
+  "database": "ecommerce",
+  "username": "readonly",
+  "password": "${env:MYSQL_PASSWORD}",
+  "connection_method": "direct"
+}
+```
+
+### SSH Tunnel Connection
+
+```json
+{
+  "host": "internal-mysql.local",
+  "port": 3306,
+  "database": "production",
+  "username": "app_user",
+  "password": "${env:MYSQL_PASSWORD}",
+  "connection_method": "ssh_tunnel",
+  "ssh_host": "bastion.example.com",
+  "ssh_port": 22,
+  "ssh_username": "ssh_user",
+  "ssh_pkey": "${env:SSH_PRIVATE_KEY}"
+}
+```
+
+## Snowflake
+
+Connect to Snowflake data warehouse using password or private key authentication.
+
+### Configuration
+
+```json
+{
+  "account": "xy12345.us-east-1",
+  "warehouse": "COMPUTE_WH",
+  "database": "ANALYTICS",
+  "schema": "PUBLIC",
+  "username": "MAGE_USER",
+  "password": "${env:SNOWFLAKE_PASSWORD}",
+  "role": "ANALYST"
+}
+```
+
+### Private Key Authentication
+
+```json
+{
+  "account": "xy12345.us-east-1",
+  "warehouse": "COMPUTE_WH",
+  "database": "ANALYTICS",
+  "schema": "PUBLIC",
+  "username": "MAGE_USER",
+  "private_key_file": "/path/to/rsa_key.p8",
+  "private_key_file_pwd": "${env:KEY_PASSWORD}",
+  "role": "ANALYST"
+}
+```
+
+<CodeGroup>
+```python Python
+from mage_integrations.sources.snowflake import Snowflake
+
+config = {
+    'account': 'xy12345.us-east-1',
+    'warehouse': 'COMPUTE_WH',
+    'database': 'ANALYTICS',
+    'schema': 'PUBLIC',
+    'username': 'MAGE_USER',
+    'password': 'secure_password'
+}
+
+source = Snowflake(config=config)
+catalog = source.discover(streams=['customers', 'transactions'])
+source.sync(catalog)
+```
+</CodeGroup>
+
+## BigQuery
+
+Extract data from Google BigQuery using service account credentials.
+
+### Configuration
+
+```json
+{
+  "dataset": "analytics",
+  "path_to_credentials_json_file": "/path/to/service-account.json"
+}
+```
+
+### Credentials Info (Alternative)
+
+```json
+{
+  "dataset": "analytics",
+  "credentials_info": {
+    "type": "service_account",
+    "project_id": "my-project",
+    "private_key_id": "key-id",
+    "private_key": "${env:GCP_PRIVATE_KEY}",
+    "client_email": "mage@my-project.iam.gserviceaccount.com",
+    "client_id": "123456789"
+  }
+}
+```
+
+<CodeGroup>
+```python Python
+from mage_integrations.sources.bigquery import BigQuery
+
+config = {
+    'dataset': 'analytics',
+    'path_to_credentials_json_file': 'service-account.json'
+}
+
+source = BigQuery(config=config)
+catalog = source.discover()
+
+for stream in catalog.streams:
+    print(f"Table: {stream.tap_stream_id}")
+    for column, props in stream.schema.properties.items():
+        print(f"  - {column}: {props['type']}")
+```
+</CodeGroup>
+
+## Redshift
+
+Connect to Amazon Redshift using standard authentication or IAM credentials.
+
+### Configuration
+
+```json
+{
+  "host": "redshift-cluster.us-west-2.redshift.amazonaws.com",
+  "port": 5439,
+  "database": "analytics",
+  "schema": "public",
+  "user": "mage_user",
+  "password": "${env:REDSHIFT_PASSWORD}"
+}
+```
+
+### IAM Authentication
+
+```json
+{
+  "cluster_identifier": "my-cluster",
+  "database": "analytics",
+  "schema": "public",
+  "db_user": "mage_user",
+  "region": "us-west-2",
+  "access_key_id": "${env:AWS_ACCESS_KEY_ID}",
+  "secret_access_key": "${env:AWS_SECRET_ACCESS_KEY}"
+}
+```
+
+## MongoDB
+
+Extract data from MongoDB with automatic schema detection.
+
+### Configuration
+
+```json
+{
+  "host": "mongodb.example.com",
+  "port": 27017,
+  "database": "app_db",
+  "username": "readonly",
+  "password": "${env:MONGO_PASSWORD}",
+  "auth_database": "admin"
+}
+```
+
+### Connection String
+
+```json
+{
+  "connection_string": "mongodb+srv://user:pass@cluster.mongodb.net/app_db?retryWrites=true",
+  "database": "app_db"
+}
+```
+
+<CodeGroup>
+```python Python
+from mage_integrations.sources.mongodb import MongoDB
+
+config = {
+    'host': 'localhost',
+    'port': 27017,
+    'database': 'mydb',
+    'username': 'user',
+    'password': 'pass'
+}
+
+source = MongoDB(config=config)
+
+# Discover collections
+catalog = source.discover(streams=['users', 'orders'])
+
+# Load data
+for stream in catalog.streams:
+    for rows in source.load_data(stream):
+        print(f"Loaded {len(rows)} records from {stream.tap_stream_id}")
+```
+</CodeGroup>
+
+## MSSQL
+
+Connect to Microsoft SQL Server with Windows or SQL Server authentication.
+
+### Configuration
+
+```json
+{
+  "host": "sqlserver.example.com",
+  "port": 1433,
+  "database": "production",
+  "schema": "dbo",
+  "username": "mage_user",
+  "password": "${env:MSSQL_PASSWORD}",
+  "authentication": "sql"
+}
+```
+
+### Windows Authentication
+
+```json
+{
+  "host": "sqlserver.local",
+  "database": "production",
+  "schema": "dbo",
+  "username": "DOMAIN\\user",
+  "authentication": "windows"
+}
+```
+
+## Oracle Database
+
+Extract data from Oracle databases.
+
+### Configuration
+
+```json
+{
+  "host": "oracle.example.com",
+  "port": 1521,
+  "service_name": "ORCL",
+  "username": "mage_user",
+  "password": "${env:ORACLE_PASSWORD}"
+}
+```
+
+## Other Databases
+
+<AccordionGroup>
+  <Accordion title="Teradata">
+    ```json
+    {
+      "host": "teradata.example.com",
+      "database": "production",
+      "username": "dbc",
+      "password": "${env:TERADATA_PASSWORD}"
+    }
+    ```
+  </Accordion>
+  
+  <Accordion title="Couchbase">
+    ```json
+    {
+      "host": "couchbase.example.com",
+      "bucket": "my_bucket",
+      "username": "admin",
+      "password": "${env:COUCHBASE_PASSWORD}"
+    }
+    ```
+  </Accordion>
+  
+  <Accordion title="DynamoDB">
+    ```json
+    {
+      "region": "us-east-1",
+      "access_key_id": "${env:AWS_ACCESS_KEY_ID}",
+      "secret_access_key": "${env:AWS_SECRET_ACCESS_KEY}",
+      "table_names": ["users", "orders"]
+    }
+    ```
+  </Accordion>
+  
+  <Accordion title="Doris">
+    ```json
+    {
+      "host": "doris.example.com",
+      "port": 9030,
+      "database": "analytics",
+      "username": "root",
+      "password": "${env:DORIS_PASSWORD}"
+    }
+    ```
+  </Accordion>
+  
+  <Accordion title="Dremio">
+    ```json
+    {
+      "host": "dremio.example.com",
+      "port": 31010,
+      "username": "dremio",
+      "password": "${env:DREMIO_PASSWORD}"
+    }
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Replication Methods
+
+All database sources support these replication strategies:
+
+### Full Table
+Complete refresh of all data on each sync:
+```json
+{
+  "replication_method": "FULL_TABLE"
+}
+```
+
+### Incremental
+Sync only new/updated records based on a timestamp or ID column:
+```json
+{
+  "replication_method": "INCREMENTAL",
+  "replication_key": "updated_at",
+  "start_date": "2024-01-01T00:00:00Z"
+}
+```
+
+### Log-Based (PostgreSQL Only)
+Real-time CDC using PostgreSQL logical replication:
+```json
+{
+  "replication_method": "LOG_BASED",
+  "replication_slot": "mage_slot",
+  "publication_name": "mage_pub"
+}
+```
+
+## Installation
+
+Install database-specific dependencies:
+
+```bash
+# PostgreSQL
+pip install "mage-ai[postgres]"
+
+# MySQL
+pip install "mage-ai[mysql]"
+
+# Snowflake
+pip install "mage-ai[snowflake]"
+
+# BigQuery
+pip install "mage-ai[bigquery]"
+
+# Redshift
+pip install "mage-ai[redshift]"
+
+# Oracle
+pip install "mage-ai[oracle]"
+
+# Multiple databases
+pip install "mage-ai[postgres,mysql,snowflake,bigquery]"
+```
+
+## Best Practices
+
+1. **Use read-only credentials** for source databases
+2. **Enable incremental sync** when possible to reduce load
+3. **Configure connection pooling** for high-volume extractions
+4. **Test connections** before scheduling pipelines
+5. **Monitor replication lag** for CDC sources
+6. **Use environment variables** for sensitive credentials
+7. **Select specific streams** to reduce data transfer
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="API Sources" icon="cloud" href="/integrations/sources/apis">
+    Connect to REST APIs and SaaS platforms
+  </Card>
+  <Card title="Cloud Storage" icon="folder" href="/integrations/sources/cloud-storage">
+    Load data from S3, GCS, and Azure Blob Storage
+  </Card>
+</CardGroup>

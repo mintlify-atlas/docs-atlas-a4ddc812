@@ -1,0 +1,442 @@
+---
+title: 'Docker Deployment'
+description: 'Deploy Mage using Docker containers and Docker Compose for local development and production'
+keywords: ['docker', 'docker-compose', 'container', 'deployment']
+---
+
+Mage provides official Docker images that make it easy to deploy locally or in production. This guide covers Docker deployment options from basic single-container setups to multi-service Docker Compose configurations.
+
+## Quick Start with Docker
+
+Pull and run the latest Mage image:
+
+```bash
+docker pull mageai/mageai:latest
+
+docker run -it -p 6789:6789 -v $(pwd):/home/src mageai/mageai:latest
+```
+
+Access Mage at `http://localhost:6789`.
+
+<Info>
+  Always mount a volume to `/home/src` to persist your pipelines and project data.
+</Info>
+
+## Docker Image Details
+
+Mage's official Docker image is based on Python 3.10 and includes:
+
+- Python data science libraries (pandas, numpy, etc.)
+- Database drivers (PostgreSQL, MySQL/MariaDB, MS SQL Server)
+- Spark integration with SparkMagic
+- R programming language support
+- Pre-installed Mage integrations
+
+### Image Specifications
+
+| Detail | Value |
+| ------ | ----- |
+| Base Image | `python:3.10-bookworm` |
+| Working Directory | `/home/src` |
+| Exposed Ports | 6789, 7789 |
+| Default User | root |
+| Entry Point | `/app/run_app.sh` |
+
+## Basic Docker Run
+
+<Steps>
+  <Step title="Pull the image">
+    Download the latest Mage image from Docker Hub:
+    
+    ```bash
+    docker pull mageai/mageai:latest
+    ```
+  </Step>
+  <Step title="Create a project directory">
+    Create a directory to store your Mage project:
+    
+    ```bash
+    mkdir mage_project
+    cd mage_project
+    ```
+  </Step>
+  <Step title="Run the container">
+    Start Mage with volume mounting:
+    
+    ```bash
+    docker run -it -p 6789:6789 -v $(pwd):/home/src mageai/mageai:latest
+    ```
+  </Step>
+  <Step title="Access the UI">
+    Open your browser to `http://localhost:6789`
+  </Step>
+</Steps>
+
+## Docker Run with Configuration
+
+Customize your deployment with environment variables:
+
+```bash
+docker run -it -p 6789:6789 \
+  -v $(pwd):/home/src \
+  -v ~/.mage_data:/root/.mage_data \
+  -e MAGE_DATA_DIR="/root/.mage_data" \
+  -e REQUIRE_USER_AUTHENTICATION=True \
+  -e AUTHENTICATION_MODE=LOCAL \
+  -e SCHEDULER_TRIGGER_INTERVAL=10 \
+  mageai/mageai:latest
+```
+
+<Warning>
+  Never commit sensitive environment variables to version control. Use `.env` files or secret management solutions.
+</Warning>
+
+## Docker Compose Deployment
+
+For production deployments, use Docker Compose to manage Mage with additional services like PostgreSQL.
+
+### Basic Docker Compose
+
+Create a `docker-compose.yml` file:
+
+```yaml docker-compose.yml
+version: '3'
+services:
+  server:
+    image: mageai/mageai:latest
+    command: mage start default_repo
+    ports:
+      - "6789:6789"
+    volumes:
+      - ./mage_data:/home/src
+    environment:
+      - MAGE_DATA_DIR=/home/src/mage_data
+    restart: on-failure:5
+```
+
+Start the service:
+
+```bash
+docker-compose up -d
+```
+
+### Docker Compose with PostgreSQL
+
+For production, add a PostgreSQL database:
+
+```yaml docker-compose.yml
+version: '3'
+services:
+  server:
+    image: mageai/mageai:latest
+    command: mage start default_repo
+    ports:
+      - "6789:6789"
+    volumes:
+      - ./mage_data:/home/src
+    environment:
+      - MAGE_DATABASE_CONNECTION_URL=postgresql://mageuser:magepassword@database:5432/mage
+      - MAGE_DATA_DIR=/home/src/mage_data
+      - REQUIRE_USER_AUTHENTICATION=True
+    depends_on:
+      - database
+    restart: on-failure:5
+    networks:
+      - mage-network
+
+  database:
+    image: pgvector/pgvector:0.6.0-pg16
+    environment:
+      POSTGRES_USER: mageuser
+      POSTGRES_PASSWORD: magepassword
+      POSTGRES_DB: mage
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: always
+    networks:
+      - mage-network
+
+networks:
+  mage-network:
+    driver: bridge
+
+volumes:
+  postgres_data:
+    driver: local
+```
+
+Start the services:
+
+```bash
+docker-compose up -d
+```
+
+<Tip>
+  The pgvector/pgvector image includes PostgreSQL with vector extensions, useful for AI/ML features.
+</Tip>
+
+## Production Docker Compose Configuration
+
+Here's a complete production-ready configuration based on Mage's source:
+
+```yaml docker-compose.yml
+version: '3'
+
+services:
+  server:
+    image: mageai/mageai:latest
+    command: "python mage_ai/server/server.py --host 0.0.0.0 --port 6789 --project default_repo"
+    environment:
+      # Authentication
+      - AUTHENTICATION_MODE=${AUTHENTICATION_MODE:-LOCAL}
+      - REQUIRE_USER_AUTHENTICATION=${REQUIRE_USER_AUTHENTICATION:-True}
+      - REQUIRE_USER_PERMISSIONS=${REQUIRE_USER_PERMISSIONS:-False}
+      
+      # Database
+      - MAGE_DATABASE_CONNECTION_URL=${DATABASE_CONNECTION_URL}
+      
+      # Data directories
+      - MAGE_DATA_DIR=${MAGE_DATA_DIR:-/home/src/mage_data}
+      
+      # AWS credentials (if using S3)
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+      
+      # GCP credentials (if using GCS)
+      - GCP_PROJECT_ID=${GCP_PROJECT_ID}
+      - GCP_REGION=${GCP_REGION}
+      
+      # Scheduler
+      - SCHEDULER_TRIGGER_INTERVAL=${SCHEDULER_TRIGGER_INTERVAL:-10}
+      
+      # Server settings
+      - SERVER_VERBOSITY=${SERVER_VERBOSITY:-info}
+      - SERVER_LOGGING_TEMPLATE=${SERVER_LOGGING_TEMPLATE:-%(levelname)s:%(name)s:%(message)s}
+      
+      # Performance
+      - CONCURRENCY_CONFIG_PIPELINE_RUN_LIMIT=${CONCURRENCY_CONFIG_PIPELINE_RUN_LIMIT}
+      - CONCURRENCY_CONFIG_BLOCK_RUN_LIMIT=${CONCURRENCY_CONFIG_BLOCK_RUN_LIMIT}
+      
+      # Monitoring (optional)
+      - ENABLE_PROMETHEUS=${ENABLE_PROMETHEUS:-False}
+      - SENTRY_DSN=${SENTRY_DSN}
+      
+    ports:
+      - "6789:6789"
+    volumes:
+      - ./mage_data:/home/src
+      - ~/.aws:/root/.aws
+      - ~/.mage_data:/root/.mage_data
+    restart: on-failure:5
+    stdin_open: true
+    tty: true
+    networks:
+      - app-network
+
+  database:
+    image: pgvector/pgvector:0.6.0-pg16
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-mageuser}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-magepassword}
+      POSTGRES_DB: ${POSTGRES_DB:-mage}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: always
+    networks:
+      - app-network
+
+networks:
+  app-network:
+    driver: bridge
+
+volumes:
+  postgres_data:
+    driver: local
+```
+
+Create a `.env` file for your environment variables:
+
+```bash .env
+# Database
+DATABASE_CONNECTION_URL=postgresql://mageuser:magepassword@database:5432/mage
+POSTGRES_USER=mageuser
+POSTGRES_PASSWORD=magepassword
+POSTGRES_DB=mage
+
+# Authentication
+AUTHENTICATION_MODE=LOCAL
+REQUIRE_USER_AUTHENTICATION=True
+
+# AWS (optional)
+# AWS_ACCESS_KEY_ID=your_access_key
+# AWS_SECRET_ACCESS_KEY=your_secret_key
+
+# GCP (optional)
+# GCP_PROJECT_ID=your_project_id
+# GCP_REGION=us-central1
+```
+
+## Docker Compose Commands
+
+<CodeGroup>
+
+```bash Start services
+docker-compose up -d
+```
+
+```bash View logs
+docker-compose logs -f server
+```
+
+```bash Stop services
+docker-compose down
+```
+
+```bash Restart services
+docker-compose restart
+```
+
+```bash Remove all data
+docker-compose down -v
+```
+
+</CodeGroup>
+
+## Volume Mounting
+
+<Tabs>
+  <Tab title="Project Data">
+    Mount your project directory to persist pipelines and code:
+    
+    ```bash
+    -v $(pwd)/mage_project:/home/src
+    ```
+    
+    This directory contains:
+    - Pipelines
+    - Blocks
+    - Configuration files
+    - Custom code
+  </Tab>
+  <Tab title="Variables & Secrets">
+    Mount the variables directory to persist runtime data:
+    
+    ```bash
+    -v ~/.mage_data:/root/.mage_data
+    ```
+    
+    This directory contains:
+    - Pipeline variables
+    - Secrets
+    - Output data
+    - Cache files
+  </Tab>
+  <Tab title="Cloud Credentials">
+    Mount cloud provider credentials:
+    
+    ```bash
+    -v ~/.aws:/root/.aws  # AWS credentials
+    -v ~/.config/gcloud:/root/.config/gcloud  # GCP credentials
+    ```
+  </Tab>
+</Tabs>
+
+## Building Custom Images
+
+If you need custom dependencies, create a custom Dockerfile:
+
+```dockerfile Dockerfile
+FROM mageai/mageai:latest
+
+# Install additional Python packages
+RUN pip install --no-cache-dir \
+    your-package==1.0.0 \
+    another-package==2.0.0
+
+# Install system dependencies
+USER root
+RUN apt-get update && apt-get install -y \
+    your-system-package \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy custom scripts or configurations
+COPY ./custom_scripts /app/custom_scripts
+
+WORKDIR /home/src
+```
+
+Build and run:
+
+```bash
+docker build -t mage-custom .
+docker run -it -p 6789:6789 -v $(pwd):/home/src mage-custom
+```
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="Container exits immediately">
+    Check the logs for errors:
+    
+    ```bash
+    docker logs <container_id>
+    ```
+    
+    Common issues:
+    - Missing volume mount for `/home/src`
+    - Invalid environment variables
+    - Port conflicts (6789 already in use)
+  </Accordion>
+  <Accordion title="Permission errors">
+    The container runs as root by default. If you have permission issues:
+    
+    ```bash
+    # Fix ownership of mounted volumes
+    sudo chown -R $(id -u):$(id -g) ./mage_data
+    ```
+  </Accordion>
+  <Accordion title="Database connection failed">
+    Verify database connectivity:
+    
+    ```bash
+    # Check if database is running
+    docker-compose ps
+    
+    # Test connection
+    docker-compose exec database psql -U mageuser -d mage
+    ```
+    
+    Ensure `MAGE_DATABASE_CONNECTION_URL` is correct.
+  </Accordion>
+  <Accordion title="Out of memory errors">
+    Increase Docker memory allocation:
+    
+    ```bash
+    # Docker Desktop: Settings -> Resources -> Memory
+    # Or use docker run with memory limit
+    docker run -m 4g -it -p 6789:6789 -v $(pwd):/home/src mageai/mageai:latest
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Configuration" icon="gear" href="/deployment/configuration">
+    Configure environment variables and settings
+  </Card>
+  <Card title="Kubernetes" icon="dharmachakra" href="/deployment/kubernetes">
+    Scale to Kubernetes for production
+  </Card>
+  <Card title="Cloud Providers" icon="cloud" href="/deployment/cloud-providers">
+    Deploy to AWS, GCP, or Azure
+  </Card>
+  <Card title="Production Best Practices" icon="shield-check" href="/deployment/overview">
+    Learn production deployment patterns
+  </Card>
+</CardGroup>

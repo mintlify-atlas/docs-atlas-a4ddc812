@@ -1,0 +1,95 @@
+---
+title: 'mage init'
+description: 'Initialize a new Mage project'
+---
+
+## Overview
+
+The `mage init` command creates a new Mage project with the necessary directory structure and configuration files.
+
+## Signature
+
+```bash
+mage init [PROJECT_PATH] [OPTIONS]
+```
+
+## Arguments
+
+<ParamField path="project_path" type="string" required>
+  Path of the Mage project to be created. This is relative to the current working directory.
+</ParamField>
+
+## Options
+
+<ParamField path="--project-type" type="string" default="standalone">
+  Type of project to create. Options are:
+  - `main` - Main project for multi-project setups
+  - `sub` - Sub-project that connects to a main project
+  - `standalone` - Independent project (default)
+</ParamField>
+
+<ParamField path="--cluster-type" type="string" default="None">
+  Type of instance to create for workspace management.
+</ParamField>
+
+<ParamField path="--project-uuid" type="string" default="None">
+  Project UUID for the new project. If not specified, one will be generated automatically.
+</ParamField>
+
+## Examples
+
+<CodeGroup>
+
+```bash Basic usage
+mage init my_project
+```
+
+```bash With project type
+mage init my_project --project-type standalone
+```
+
+```bash Sub-project
+mage init my_subproject --project-type sub
+```
+
+```bash With custom UUID
+mage init my_project --project-uuid my-custom-uuid-123
+```
+
+</CodeGroup>
+
+## Behavior
+
+When you run `mage init`, the command:
+
+1. Creates the project directory at the specified path (relative to current directory)
+2. Initializes the repository with the specified project type
+3. Sets up the basic directory structure and configuration files
+4. Prints a confirmation message with the absolute path to the created project
+
+## Implementation Details
+
+The command is implemented in `mage_ai/cli/main.py:99-118`:
+
+```python
+@app.command()
+def init(
+    project_path: str = INIT_PROJECT_PATH_DEFAULT,
+    project_type: Union[str, None] = INIT_PROJECT_TYPE_DEFAULT,
+    cluster_type: str = INIT_CLUSTER_TYPE_DEFAULT,
+    project_uuid: str = INIT_PROJECT_UUID_DEFAULT,
+):
+    """
+    Initialize Mage project.
+    """
+    from mage_ai.data_preparation.repo_manager import init_repo
+
+    repo_path = os.path.join(os.getcwd(), project_path)
+    init_repo(
+        repo_path,
+        project_type=project_type,
+        cluster_type=cluster_type,
+        project_uuid=project_uuid,
+    )
+    print(f'Initialized Mage project at {repo_path}')
+```

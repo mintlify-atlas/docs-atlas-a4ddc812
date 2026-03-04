@@ -1,0 +1,224 @@
+---
+title: 'Using the Notebook Interface'
+description: 'Learn how to use Mage notebook-style interface for interactive development'
+---
+
+## Overview
+
+Mage provides a notebook-style interface for developing data pipelines interactively. The interface uses Jupyter kernels under the hood and supports Python, PySpark, and R blocks.
+
+## Kernel Architecture
+
+Mage uses Jupyter kernel managers to execute code blocks. The kernel selection depends on your pipeline type:
+
+```python
+# From mage_ai/server/kernels.py
+from jupyter_client import KernelManager
+from jupyter_client.session import Session
+
+class KernelName(StrEnum):
+    PYSPARK = 'pysparkkernel'
+    PYTHON3 = 'python3'
+
+PIPELINE_TO_KERNEL_NAME = {
+    PipelineType.INTEGRATION: KernelName.PYTHON3,
+    PipelineType.DATABRICKS: KernelName.PYTHON3,
+    PipelineType.PYTHON: KernelName.PYTHON3,
+    PipelineType.PYSPARK: KernelName.PYSPARK,
+    PipelineType.STREAMING: KernelName.PYTHON3,
+}
+```
+
+## Interactive Execution
+
+When you execute a block in the notebook UI, Mage:
+
+<Steps>
+  <Step title="Validates upstream dependencies">
+    Ensures all upstream blocks have been executed and their outputs are available
+  </Step>
+  
+  <Step title="Loads input variables">
+    Fetches outputs from upstream blocks as function parameters
+  </Step>
+  
+  <Step title="Executes the decorated function">
+    Runs your code with the appropriate decorator (@data_loader, @transformer, etc.)
+  </Step>
+  
+  <Step title="Stores outputs">
+    Saves block outputs to the variable manager for downstream blocks
+  </Step>
+  
+  <Step title="Displays results">
+    Shows data previews, statistics, and visualizations in the UI
+  </Step>
+</Steps>
+
+## Block Execution Flow
+
+```python
+# From mage_ai/data_preparation/models/block/__init__.py
+
+async def execute_and_run_tests() -> None:
+    with BlockFunctionExec(
+        block.uuid,
+        f'Executing {block.type} block...',
+        build_block_output_stdout=build_block_output_stdout,
+    ):
+        variables = global_vars
+        if from_notebook:
+            logger = logging.getLogger(f'{block.uuid}_test')
+            logger.setLevel('INFO')
+            if 'logger' not in variables:
+                variables = {
+                    'logger': logger,
+                    **variables,
+                }
+        await block.execute(
+            analyze_outputs=analyze_outputs,
+            build_block_output_stdout=build_block_output_stdout,
+            global_vars=variables,
+            run_all_blocks=True,
+            run_sensors=run_sensors,
+            update_status=update_status,
+            parallel=parallel,
+        )
+```
+
+## Working with Multiple Outputs
+
+Blocks can return multiple outputs that become available to downstream blocks:
+
+```python
+@data_loader
+def load_data(**kwargs):
+    # Return multiple outputs
+    return [
+        {'users': user_df},
+        {'orders': order_df},
+    ]
+```
+
+Outputs are stored with keys like `output_0`, `output_1`, etc.
+
+```python
+# From mage_ai/data_preparation/models/block/__init__.py
+output_count = len(block_output)
+variable_keys = [f'output_{idx}' for idx in range(output_count)]
+variable_mapping = dict(zip(variable_keys, block_output))
+```
+
+## Running Upstream Blocks
+
+You can execute all upstream blocks before running your current block:
+
+```python
+# From mage_ai/data_preparation/models/block/__init__.py
+def run_upstream_blocks(
+    self, 
+    from_notebook: bool = False, 
+    incomplete_only: bool = False, 
+    **kwargs
+) -> None:
+    """
+    Execute all upstream blocks in dependency order.
+    
+    Args:
+        from_notebook: Whether execution is from the notebook UI
+        incomplete_only: Only run blocks that haven't been executed
+    """
+    upstream_blocks = list(
+        filter(
+            lambda x: not incomplete_only or BlockStatus.EXECUTED != x.status,
+            self.get_all_upstream_blocks(),
+        )
+    )
+    root_blocks = []
+    upstream_block_uuids = list(
+        map(lambda x: process_upstream_block(x, root_blocks), upstream_blocks),
+    )
+
+    run_blocks_sync(
+        root_blocks,
+        from_notebook=from_notebook,
+        selected_blocks=upstream_block_uuids,
+        **kwargs,
+    )
+```
+
+## Block Status
+
+Blocks have the following execution statuses:
+
+<CodeGroup>
+```python Python
+from mage_ai.data_preparation.models.constants import BlockStatus
+
+class BlockStatus(str, Enum):
+    NOT_EXECUTED = 'not_executed'
+    EXECUTED = 'executed'
+    FAILED = 'failed'
+    UPDATED = 'updated'  # Code changed since last execution
+```
+</CodeGroup>
+
+## Output Display
+
+Mage analyzes and formats outputs for display in the notebook:
+
+```python
+# DataFrames are sampled for preview
+DATAFRAME_SAMPLE_COUNT_PREVIEW = 10  # Default sample size
+
+# Analysis includes shape, statistics, and type information
+def analyze_outputs(
+    self,
+    variable_mapping,
+    execution_partition: str = None,
+    shape_only: bool = False,
+) -> None:
+    """
+    Analyze block outputs and store metadata.
+    
+    For DataFrames: shape, column types, statistics
+    For other types: basic type and size information
+    """
+```
+
+## Websocket Communication
+
+The notebook UI communicates with the backend via WebSockets for real-time updates:
+
+```python
+# From mage_ai/server/websocket_server.py
+# Real-time streaming of:
+# - Block execution output
+# - Logs and errors
+# - Variable updates
+# - Block status changes
+```
+
+<Note>
+  The notebook interface automatically saves block code changes and maintains execution state across sessions.
+</Note>
+
+## Best Practices
+
+<Tip>
+  **Run upstream blocks first**: Use "Run upstream blocks" to ensure all dependencies are up to date before executing your block.
+</Tip>
+
+<Tip>
+  **Check block status**: Green checkmarks indicate executed blocks. Yellow indicates code has been updated since last execution.
+</Tip>
+
+<Warning>
+  Large outputs may be truncated in the UI preview. Use the full output view or export data to examine complete results.
+</Warning>
+
+## Next Steps
+
+- Learn about [writing block code](/development/writing-code)
+- Understand [variables and data passing](/development/variables)
+- Explore [testing blocks](/development/testing)

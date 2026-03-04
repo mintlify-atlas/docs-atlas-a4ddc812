@@ -1,0 +1,288 @@
+---
+title: Welcome to Mage
+description: Build modern data pipelines with confidence
+mode: custom
+---
+
+<div className="relative w-full overflow-hidden bg-gradient-to-br from-[#000000] via-[#0a0a0a] to-[#040604] dark:from-[#000000] dark:via-[#0a0a0a] dark:to-[#040604]">
+  <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(4,234,121,0.1),transparent_50%)]"></div>
+  <div className="relative max-w-7xl mx-auto px-6 sm:px-8 py-20 lg:py-24">
+    <div className="grid lg:grid-cols-12 gap-8 lg:gap-12 items-center">
+      <div className="lg:col-span-7">
+        <h1 className="text-4xl sm:text-5xl lg:text-6xl font-bold text-white mb-6">
+          Build modern data pipelines with confidence
+        </h1>
+        <p className="text-lg sm:text-xl text-gray-300 dark:text-gray-300 mb-8 max-w-2xl">
+          Mage is an open-source data pipeline tool for building, running, and orchestrating data transformations. Create ETL/ELT workflows with Python, SQL, or R in a visual notebook interface.
+        </p>
+        <div className="flex flex-wrap gap-4">
+          <a
+            href="/quickstart"
+            className="inline-flex items-center px-6 py-3 bg-[#04ea79] hover:bg-[#048b48] text-black font-semibold rounded-lg transition-colors"
+          >
+            Get Started
+            <svg className="ml-2 w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7l5 5m0 0l-5 5m5-5H6" />
+            </svg>
+          </a>
+          <a
+            href="/api/cli/init"
+            className="inline-flex items-center px-6 py-3 border border-white/30 bg-white/10 hover:bg-white/20 text-white font-semibold rounded-lg transition-colors"
+          >
+            View API Reference
+          </a>
+        </div>
+      </div>
+      <div className="lg:col-span-5 hidden lg:block">
+        <div className="relative">
+          <div className="absolute inset-0 bg-gradient-to-br from-[#04ea79]/20 to-transparent rounded-2xl blur-3xl"></div>
+          <div className="relative bg-[#1a1d27] dark:bg-[#1a1d27] rounded-2xl border border-[#27272a] dark:border-[#27272a] p-6 shadow-2xl">
+            <div className="flex items-center gap-2 mb-4">
+              <div className="w-3 h-3 rounded-full bg-red-500"></div>
+              <div className="w-3 h-3 rounded-full bg-yellow-500"></div>
+              <div className="w-3 h-3 rounded-full bg-green-500"></div>
+            </div>
+            <pre className="text-sm text-gray-300 dark:text-gray-300 overflow-x-auto">
+{`# Install Mage
+pip install mage-ai
+
+# Initialize a new project
+mage init my_project
+
+# Start the server
+cd my_project
+mage start`}
+            </pre>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div className="mt-16 mb-16 max-w-5xl mx-auto px-6">
+  <h2 className="text-3xl font-bold text-gray-900 dark:text-white mb-4">Quick start</h2>
+  <p className="text-base text-gray-600 dark:text-gray-400 mb-8">Get up and running with Mage in minutes</p>
+  
+  <Steps>
+    <Step title="Install Mage">
+      Install Mage using pip, Docker, or conda:
+      
+      <CodeGroup>
+      ```bash pip
+      pip install mage-ai
+      ```
+      
+      ```bash Docker
+      docker pull mageai/mageai:latest
+      ```
+      
+      ```bash conda
+      conda install -c conda-forge mage-ai
+      ```
+      </CodeGroup>
+    </Step>
+    
+    <Step title="Initialize your project">
+      Create a new Mage project in your desired directory:
+      
+      ```bash
+      mage init my_first_project
+      cd my_first_project
+      ```
+      
+      This creates a new project with a default folder structure including pipelines, data loaders, transformers, and exporters.
+    </Step>
+    
+    <Step title="Start the Mage server">
+      Launch the Mage UI and server:
+      
+      ```bash
+      mage start
+      ```
+      
+      Open your browser and navigate to `http://localhost:6789` to access the Mage interface.
+      
+      <Note>
+        By default, Mage runs on port 6789. You can customize the host and port using `mage start --host 0.0.0.0 --port 8080`
+      </Note>
+    </Step>
+    
+    <Step title="Create your first pipeline">
+      In the Mage UI:
+      
+      1. Click **+ New pipeline**
+      2. Choose a pipeline type (Standard, Streaming, or Integration)
+      3. Add blocks to load, transform, and export your data
+      4. Run your pipeline and view the results
+      
+      See the [Creating Pipelines](/pipelines/creating-pipelines) guide for detailed instructions.
+    </Step>
+  </Steps>
+</div>
+
+<div className="mt-16 mb-16 max-w-5xl mx-auto px-6">
+  <h2 className="text-3xl font-bold text-gray-900 dark:text-white mb-4">Explore by topic</h2>
+  <p className="text-base text-gray-600 dark:text-gray-400 mb-8">Learn about Mage's key features and capabilities</p>
+  
+  <CardGroup cols={3}>
+    <Card title="Pipelines" icon="diagram-project" href="/pipelines/overview">
+      Build data pipelines with modular blocks using Python, SQL, or R
+    </Card>
+    <Card title="Data Integrations" icon="plug" href="/integrations/overview">
+      Connect to 50+ data sources and destinations out of the box
+    </Card>
+    <Card title="Orchestration" icon="clock" href="/orchestration/overview">
+      Schedule and monitor pipeline runs with triggers and sensors
+    </Card>
+    <Card title="Development" icon="code" href="/development/notebook-ui">
+      Write and test code in an interactive notebook-style interface
+    </Card>
+    <Card title="Deployment" icon="rocket" href="/deployment/overview">
+      Deploy to Docker, Kubernetes, AWS, GCP, Azure, and more
+    </Card>
+    <Card title="Advanced Features" icon="stars" href="/advanced/dbt-integration">
+      Explore dbt integration, streaming, Spark, and AI features
+    </Card>
+  </CardGroup>
+</div>
+
+<div className="mt-16 mb-16 max-w-5xl mx-auto px-6">
+  <h2 className="text-3xl font-bold text-gray-900 dark:text-white mb-4">Popular integrations</h2>
+  <p className="text-base text-gray-600 dark:text-gray-400 mb-8">Connect to your data sources and destinations</p>
+  
+  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+    <a href="/integrations/sources/databases" className="group block rounded-2xl border border-gray-200 dark:border-[#27272a] hover:border-[#04ea79] dark:hover:border-[#04ea79] overflow-hidden no-underline transition-colors">
+      <div className="p-6 bg-white dark:bg-[#1a1d27]">
+        <h3 className="text-base font-semibold text-gray-900 dark:text-white mb-2">Database Sources</h3>
+        <p className="text-sm text-gray-600 dark:text-gray-400 mb-3">
+          PostgreSQL, MySQL, BigQuery, Snowflake, Redshift, and more
+        </p>
+        <div className="flex items-center text-sm font-medium text-gray-900 dark:text-white group-hover:text-[#04ea79] dark:group-hover:text-[#04ea79]">
+          View sources
+          <svg className="ml-1 w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+          </svg>
+        </div>
+      </div>
+    </a>
+    
+    <a href="/integrations/sources/apis" className="group block rounded-2xl border border-gray-200 dark:border-[#27272a] hover:border-[#04ea79] dark:hover:border-[#04ea79] overflow-hidden no-underline transition-colors">
+      <div className="p-6 bg-white dark:bg-[#1a1d27]">
+        <h3 className="text-base font-semibold text-gray-900 dark:text-white mb-2">API Sources</h3>
+        <p className="text-sm text-gray-600 dark:text-gray-400 mb-3">
+          REST APIs, GraphQL, Salesforce, Stripe, Google Analytics, and more
+        </p>
+        <div className="flex items-center text-sm font-medium text-gray-900 dark:text-white group-hover:text-[#04ea79] dark:group-hover:text-[#04ea79]">
+          View sources
+          <svg className="ml-1 w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+          </svg>
+        </div>
+      </div>
+    </a>
+    
+    <a href="/integrations/sources/cloud-storage" className="group block rounded-2xl border border-gray-200 dark:border-[#27272a] hover:border-[#04ea79] dark:hover:border-[#04ea79] overflow-hidden no-underline transition-colors">
+      <div className="p-6 bg-white dark:bg-[#1a1d27]">
+        <h3 className="text-base font-semibold text-gray-900 dark:text-white mb-2">Cloud Storage</h3>
+        <p className="text-sm text-gray-600 dark:text-gray-400 mb-3">
+          S3, GCS, Azure Blob Storage, and local file systems
+        </p>
+        <div className="flex items-center text-sm font-medium text-gray-900 dark:text-white group-hover:text-[#04ea79] dark:group-hover:text-[#04ea79]">
+          View sources
+          <svg className="ml-1 w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+          </svg>
+        </div>
+      </div>
+    </a>
+    
+    <a href="/integrations/sources/streaming" className="group block rounded-2xl border border-gray-200 dark:border-[#27272a] hover:border-[#04ea79] dark:hover:border-[#04ea79] overflow-hidden no-underline transition-colors">
+      <div className="p-6 bg-white dark:bg-[#1a1d27]">
+        <h3 className="text-base font-semibold text-gray-900 dark:text-white mb-2">Streaming Sources</h3>
+        <p className="text-sm text-gray-600 dark:text-gray-400 mb-3">
+          Kafka, RabbitMQ, AWS Kinesis, Google Pub/Sub, and more
+        </p>
+        <div className="flex items-center text-sm font-medium text-gray-900 dark:text-white group-hover:text-[#04ea79] dark:group-hover:text-[#04ea79]">
+          View sources
+          <svg className="ml-1 w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+          </svg>
+        </div>
+      </div>
+    </a>
+  </div>
+</div>
+
+<div className="mt-16 mb-16 max-w-5xl mx-auto px-6">
+  <h2 className="text-3xl font-bold text-gray-900 dark:text-white mb-4">Key features</h2>
+  <p className="text-base text-gray-600 dark:text-gray-400 mb-8">What makes Mage powerful for data engineering teams</p>
+  
+  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+    <div className="p-6 rounded-xl bg-white dark:bg-[#1a1d27] border border-gray-200 dark:border-[#27272a]">
+      <div className="w-10 h-10 rounded-lg bg-[#04ea79]/10 dark:bg-[#04ea79]/10 flex items-center justify-center mb-4">
+        <svg className="w-6 h-6 text-[#04ea79]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+        </svg>
+      </div>
+      <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">Notebook-style interface</h3>
+      <p className="text-sm text-gray-600 dark:text-gray-400">
+        Write and test code in an interactive notebook environment with instant feedback and data previews
+      </p>
+    </div>
+    
+    <div className="p-6 rounded-xl bg-white dark:bg-[#1a1d27] border border-gray-200 dark:border-[#27272a]">
+      <div className="w-10 h-10 rounded-lg bg-[#04ea79]/10 dark:bg-[#04ea79]/10 flex items-center justify-center mb-4">
+        <svg className="w-6 h-6 text-[#04ea79]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+        </svg>
+      </div>
+      <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">Dynamic blocks</h3>
+      <p className="text-sm text-gray-600 dark:text-gray-400">
+        Execute blocks in parallel based on runtime conditions for efficient data processing
+      </p>
+    </div>
+    
+    <div className="p-6 rounded-xl bg-white dark:bg-[#1a1d27] border border-gray-200 dark:border-[#27272a]">
+      <div className="w-10 h-10 rounded-lg bg-[#04ea79]/10 dark:bg-[#04ea79]/10 flex items-center justify-center mb-4">
+        <svg className="w-6 h-6 text-[#04ea79]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4" />
+        </svg>
+      </div>
+      <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">Built-in orchestration</h3>
+      <p className="text-sm text-gray-600 dark:text-gray-400">
+        Schedule pipelines with cron expressions, event triggers, or API calls
+      </p>
+    </div>
+    
+    <div className="p-6 rounded-xl bg-white dark:bg-[#1a1d27] border border-gray-200 dark:border-[#27272a]">
+      <div className="w-10 h-10 rounded-lg bg-[#04ea79]/10 dark:bg-[#04ea79]/10 flex items-center justify-center mb-4">
+        <svg className="w-6 h-6 text-[#04ea79]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+        </svg>
+      </div>
+      <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">AI-powered development</h3>
+      <p className="text-sm text-gray-600 dark:text-gray-400">
+        Generate code, fix errors, and optimize queries with AI assistance
+      </p>
+    </div>
+  </div>
+</div>
+
+<div className="mt-20 mb-16 max-w-5xl mx-auto px-6">
+  <div className="rounded-2xl bg-gradient-to-br from-[#04ea79]/10 to-transparent dark:from-[#04ea79]/10 dark:to-transparent border border-[#04ea79]/20 dark:border-[#04ea79]/20 p-8 md:p-12">
+    <h2 className="text-2xl md:text-3xl font-bold text-gray-900 dark:text-white mb-4">Ready to build your first pipeline?</h2>
+    <p className="text-base text-gray-600 dark:text-gray-400 mb-6 max-w-2xl">
+      Get started with Mage in minutes and transform your data workflows with modern orchestration tools.
+    </p>
+    <a
+      href="/quickstart"
+      className="inline-flex items-center px-6 py-3 bg-[#04ea79] hover:bg-[#048b48] text-black font-semibold rounded-lg transition-colors"
+    >
+      Start building now
+      <svg className="ml-2 w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7l5 5m0 0l-5 5m5-5H6" />
+      </svg>
+    </a>
+  </div>
+</div>

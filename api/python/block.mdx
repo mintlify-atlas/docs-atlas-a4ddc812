@@ -1,0 +1,568 @@
+---
+title: 'Block'
+description: 'Fundamental building blocks for data transformation in Mage'
+---
+
+## Overview
+
+The `Block` class represents a single unit of code execution in a Mage pipeline. Blocks can be data loaders, transformers, exporters, sensors, or custom code.
+
+## Constructor
+
+```python
+Block(
+    name: str,
+    uuid: str,
+    block_type: BlockType,
+    block_color: BlockColor = None,
+    content: str = None,
+    executor_config: dict = None,
+    executor_type: ExecutorType = ExecutorType.LOCAL_PYTHON,
+    extension_uuid: str = None,
+    groups: list[str] = None,
+    status: BlockStatus = BlockStatus.NOT_EXECUTED,
+    pipeline: Pipeline = None,
+    replicated_block: str = None,
+    retry_config: dict = None,
+    language: BlockLanguage = BlockLanguage.PYTHON,
+    configuration: dict = None,
+    has_callback: bool = False,
+    timeout: int = None,
+)
+```
+
+<ParamField path="name" type="str" required>
+  Block name
+</ParamField>
+
+<ParamField path="uuid" type="str" required>
+  Unique identifier for the block
+</ParamField>
+
+<ParamField path="block_type" type="BlockType" required>
+  Type of block (DATA_LOADER, TRANSFORMER, DATA_EXPORTER, SENSOR, DBT, CUSTOM, etc.)
+</ParamField>
+
+<ParamField path="block_color" type="BlockColor">
+  Color identifier for UI display
+</ParamField>
+
+<ParamField path="content" type="str">
+  Block source code content
+</ParamField>
+
+<ParamField path="executor_type" type="ExecutorType" default="ExecutorType.LOCAL_PYTHON">
+  Execution environment (LOCAL_PYTHON, ECS, GCP_CLOUD_RUN, AZURE_CONTAINER_INSTANCE, K8S, PYSPARK)
+</ParamField>
+
+<ParamField path="language" type="BlockLanguage" default="BlockLanguage.PYTHON">
+  Programming language (PYTHON, SQL, R, YAML)
+</ParamField>
+
+<ParamField path="configuration" type="dict">
+  Block-specific configuration settings
+</ParamField>
+
+<ParamField path="pipeline" type="Pipeline">
+  Parent pipeline instance
+</ParamField>
+
+<ParamField path="timeout" type="int">
+  Execution timeout in seconds
+</ParamField>
+
+## Class Methods
+
+### create
+
+Creates a new block in the repository.
+
+```python
+@classmethod
+def create(
+    name: str,
+    block_type: str,
+    repo_path: str,
+    color: str = None,
+    configuration: dict = None,
+    extension_uuid: str = None,
+    language: str = None,
+    pipeline: Pipeline = None,
+    priority: int = None,
+    replicated_block: str = None,
+    require_unique_name: bool = False,
+    upstream_block_uuids: list[str] = None,
+    downstream_block_uuids: list[str] = None,
+    config: dict = None,
+    widget: bool = False,
+) -> Block
+```
+
+<ParamField path="name" type="str" required>
+  Block name (will be converted to snake_case for UUID)
+</ParamField>
+
+<ParamField path="block_type" type="str" required>
+  Type of block to create
+</ParamField>
+
+<ParamField path="repo_path" type="str" required>
+  Path to the repository
+</ParamField>
+
+<ParamField path="language" type="str" default="python">
+  Programming language for the block
+</ParamField>
+
+<ParamField path="pipeline" type="Pipeline">
+  Pipeline to add the block to
+</ParamField>
+
+<ParamField path="upstream_block_uuids" type="list[str]">
+  List of upstream block dependencies
+</ParamField>
+
+<ResponseField name="return" type="Block">
+  Newly created Block instance
+</ResponseField>
+
+**Example:**
+
+```python
+from mage_ai.data_preparation.models.block import Block
+from mage_ai.data_preparation.models.pipeline import Pipeline
+
+pipeline = Pipeline.get('my_pipeline')
+
+block = Block.create(
+    'Load Customer Data',
+    'data_loader',
+    repo_path=pipeline.repo_path,
+    language='python',
+    pipeline=pipeline
+)
+```
+
+### get_all_blocks
+
+Returns all blocks in the repository grouped by type.
+
+```python
+@classmethod
+def get_all_blocks(repo_path: str) -> dict
+```
+
+<ResponseField name="return" type="dict">
+  Dictionary with block types as keys and lists of block UUIDs as values
+</ResponseField>
+
+**Example:**
+
+```python
+blocks = Block.get_all_blocks('/path/to/repo')
+print(f"Data loaders: {blocks.get('data_loader', [])}")
+print(f"Transformers: {blocks.get('transformer', [])}")
+```
+
+### get_block_from_file_path
+
+Creates a Block instance from a file path.
+
+```python
+@classmethod
+def get_block_from_file_path(file_path: str) -> Block
+```
+
+<ParamField path="file_path" type="str" required>
+  Path to the block file
+</ParamField>
+
+<ResponseField name="return" type="Block">
+  Block instance
+</ResponseField>
+
+## Instance Methods
+
+### execute_sync
+
+Executes the block synchronously.
+
+```python
+def execute_sync(
+    analyze_outputs: bool = False,
+    block_run_outputs_cache: dict = None,
+    build_block_output_stdout: Callable = None,
+    custom_code: str = None,
+    execution_partition: str = None,
+    from_notebook: bool = False,
+    global_vars: dict = None,
+    logger: Logger = None,
+    logging_tags: dict = None,
+    run_all_blocks: bool = False,
+    update_status: bool = True,
+    store_variables: bool = True,
+    verify_output: bool = True,
+    runtime_arguments: dict = None,
+    dynamic_block_index: int = None,
+) -> dict
+```
+
+<ParamField path="global_vars" type="dict">
+  Global variables available to the block during execution
+</ParamField>
+
+<ParamField path="execution_partition" type="str">
+  Partition identifier for variable storage
+</ParamField>
+
+<ParamField path="from_notebook" type="bool" default="False">
+  Whether execution is from the notebook interface
+</ParamField>
+
+<ParamField path="store_variables" type="bool" default="True">
+  Whether to persist output variables to disk
+</ParamField>
+
+<ParamField path="runtime_arguments" type="dict">
+  Additional runtime arguments
+</ParamField>
+
+<ResponseField name="return" type="dict">
+  Dictionary containing execution output with key 'output'
+</ResponseField>
+
+**Example:**
+
+```python
+block = pipeline.get_block('load_data')
+
+result = block.execute_sync(
+    global_vars={'env': 'production', 'date': '2024-01-01'},
+    store_variables=True,
+    run_all_blocks=False
+)
+
+print(f"Execution result: {result}")
+```
+
+### async execute
+
+Executes the block asynchronously.
+
+```python
+async def execute(
+    analyze_outputs: bool = False,
+    build_block_output_stdout: Callable = None,
+    custom_code: str = None,
+    global_vars: dict = None,
+    run_all_blocks: bool = False,
+    run_sensors: bool = True,
+    update_status: bool = True,
+    parallel: bool = True,
+) -> None
+```
+
+**Example:**
+
+```python
+import asyncio
+
+async def run_block():
+    block = pipeline.get_block('transform_data')
+    await block.execute(
+        global_vars={'env': 'staging'},
+        parallel=True
+    )
+
+asyncio.run(run_block())
+```
+
+### execute_with_callback
+
+Executes the block with callback functions for success/failure handling.
+
+```python
+def execute_with_callback(
+    global_vars: dict = None,
+    logger: Logger = None,
+    logging_tags: dict = None,
+    execution_uuid: str = None,
+    from_notebook: bool = False,
+    **kwargs,
+) -> dict
+```
+
+<ParamField path="global_vars" type="dict">
+  Global variables for execution
+</ParamField>
+
+<ParamField path="execution_uuid" type="str">
+  Unique identifier for this execution
+</ParamField>
+
+<ResponseField name="return" type="dict">
+  Execution output dictionary
+</ResponseField>
+
+**Example:**
+
+```python
+result = block.execute_with_callback(
+    global_vars={'api_key': 'xxx'},
+    execution_uuid='run_123'
+)
+```
+
+### update_content
+
+Updates the block's source code content.
+
+```python
+def update_content(
+    content: str,
+    widget: bool = False,
+) -> None
+```
+
+<ParamField path="content" type="str" required>
+  New source code content
+</ParamField>
+
+**Example:**
+
+```python
+new_code = '''
+@data_loader
+def load_data(*args, **kwargs):
+    return {'key': 'value'}
+'''
+
+block.update_content(new_code)
+```
+
+### async update_content_async
+
+Asynchronously updates block content.
+
+```python
+async def update_content_async(
+    content: str,
+    widget: bool = False,
+) -> None
+```
+
+### delete
+
+Deletes the block from the pipeline and/or filesystem.
+
+```python
+def delete(
+    widget: bool = False,
+    commit: bool = True,
+    force: bool = False,
+) -> None
+```
+
+<ParamField path="force" type="bool" default="False">
+  Force deletion even if block has downstream dependencies
+</ParamField>
+
+<ParamField path="commit" type="bool" default="True">
+  Whether to save the pipeline after deletion
+</ParamField>
+
+**Example:**
+
+```python
+block = pipeline.get_block('old_block')
+block.delete(force=False, commit=True)
+```
+
+### to_dict
+
+Converts the block to a dictionary representation.
+
+```python
+def to_dict(
+    include_content: bool = False,
+    include_outputs: bool = False,
+    sample_count: int = None,
+    check_if_file_exists: bool = False,
+) -> dict
+```
+
+<ResponseField name="return" type="dict">
+  Dictionary with keys: uuid, name, type, language, upstream_blocks, downstream_blocks, configuration, etc.
+</ResponseField>
+
+**Example:**
+
+```python
+block_dict = block.to_dict(include_content=True)
+print(f"Block {block_dict['name']} has {len(block_dict['upstream_blocks'])} upstream dependencies")
+```
+
+### store_variables
+
+Stores output variables to disk.
+
+```python
+def store_variables(
+    variable_mapping: dict,
+    execution_partition: str = None,
+    override_outputs: bool = False,
+    spark=None,
+) -> list[Variable]
+```
+
+<ParamField path="variable_mapping" type="dict" required>
+  Dictionary mapping variable names to values
+</ParamField>
+
+<ParamField path="execution_partition" type="str">
+  Partition identifier for variable storage
+</ParamField>
+
+<ResponseField name="return" type="list[Variable]">
+  List of stored Variable objects
+</ResponseField>
+
+**Example:**
+
+```python
+variable_mapping = {
+    'output_0': df,
+    'output_1': metadata
+}
+
+block.store_variables(
+    variable_mapping,
+    execution_partition='2024_01_01'
+)
+```
+
+## Properties
+
+<ResponseField name="uuid" type="str">
+  Block unique identifier
+</ResponseField>
+
+<ResponseField name="name" type="str">
+  Block name
+</ResponseField>
+
+<ResponseField name="type" type="BlockType">
+  Block type (DATA_LOADER, TRANSFORMER, DATA_EXPORTER, etc.)
+</ResponseField>
+
+<ResponseField name="language" type="BlockLanguage">
+  Programming language (PYTHON, SQL, R, YAML)
+</ResponseField>
+
+<ResponseField name="content" type="str">
+  Block source code
+</ResponseField>
+
+<ResponseField name="status" type="BlockStatus">
+  Execution status (NOT_EXECUTED, EXECUTED, FAILED, etc.)
+</ResponseField>
+
+<ResponseField name="upstream_blocks" type="list[Block]">
+  List of upstream block dependencies
+</ResponseField>
+
+<ResponseField name="downstream_blocks" type="list[Block]">
+  List of downstream blocks that depend on this block
+</ResponseField>
+
+<ResponseField name="upstream_block_uuids" type="list[str]">
+  List of upstream block UUIDs
+</ResponseField>
+
+<ResponseField name="downstream_block_uuids" type="list[str]">
+  List of downstream block UUIDs
+</ResponseField>
+
+<ResponseField name="file_path" type="str">
+  Absolute path to the block's source file
+</ResponseField>
+
+<ResponseField name="configuration" type="dict">
+  Block configuration dictionary
+</ResponseField>
+
+<ResponseField name="outputs" type="list">
+  Block execution outputs
+</ResponseField>
+
+<ResponseField name="pipeline" type="Pipeline">
+  Parent pipeline instance
+</ResponseField>
+
+<ResponseField name="variable_manager" type="VariableManager">
+  Variable manager for reading/writing variables
+</ResponseField>
+
+## Complete Example
+
+```python
+from mage_ai.data_preparation.models.pipeline import Pipeline
+from mage_ai.data_preparation.models.block import Block
+import pandas as pd
+
+# Get or create pipeline
+pipeline = Pipeline.get('customer_etl')
+
+# Create data loader block
+loader = Block.create(
+    'load_customers',
+    'data_loader',
+    repo_path=pipeline.repo_path,
+    language='python',
+    pipeline=pipeline
+)
+
+# Update block content
+loader_code = '''
+@data_loader
+def load_data(*args, **kwargs):
+    # Load data from API
+    return pd.DataFrame({
+        'customer_id': [1, 2, 3],
+        'name': ['Alice', 'Bob', 'Charlie']
+    })
+'''
+loader.update_content(loader_code)
+
+# Create transformer block
+transformer = Block.create(
+    'clean_data',
+    'transformer',
+    repo_path=pipeline.repo_path,
+    language='python',
+    pipeline=pipeline,
+    upstream_block_uuids=['load_customers']
+)
+
+transformer_code = '''
+@transformer
+def transform(data, *args, **kwargs):
+    # Clean and transform data
+    data['name'] = data['name'].str.upper()
+    return data
+'''
+transformer.update_content(transformer_code)
+
+# Execute blocks
+loader_result = loader.execute_sync(
+    global_vars={'env': 'production'},
+    store_variables=True
+)
+
+transformer_result = transformer.execute_sync(
+    global_vars={'env': 'production'},
+    store_variables=True
+)
+
+print(f"Pipeline completed with {len(pipeline.blocks_by_uuid)} blocks")
+```

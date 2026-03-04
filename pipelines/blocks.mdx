@@ -1,0 +1,558 @@
+---
+title: 'Blocks'
+description: 'Understanding block types and how to use them in Mage pipelines'
+icon: 'cube'
+---
+
+## What is a Block?
+
+A **Block** is the fundamental building unit of a Mage pipeline. Each block represents a single operation in your data workflow, such as loading data from a source, transforming it, or exporting it to a destination.
+
+Blocks are organized as a directed acyclic graph (DAG), where dependencies between blocks determine the execution order.
+
+## Block Types
+
+Mage supports several block types, each serving a specific purpose in your data pipeline:
+
+### Data Loader
+
+Load data from various sources into your pipeline.
+
+```python
+from mage_ai.data_preparation.decorators import data_loader
+import pandas as pd
+
+@data_loader
+def load_data(*args, **kwargs):
+    """
+    Load data from a database or API.
+    
+    Returns:
+        DataFrame or list: Data loaded from source
+    """
+    # Load from PostgreSQL
+    from mage_ai.io.postgres import Postgres
+    
+    config = {
+        'host': 'localhost',
+        'port': 5432,
+        'database': 'mydb',
+        'user': 'postgres',
+        'password': 'password',
+    }
+    
+    query = 'SELECT * FROM customers WHERE created_at >= CURRENT_DATE'
+    return Postgres(**config).load(query)
+```
+
+**Common Data Sources:**
+- Databases (PostgreSQL, MySQL, Redshift, Snowflake, BigQuery)
+- Cloud storage (S3, GCS, Azure Blob Storage)
+- APIs and web services
+- Files (CSV, JSON, Parquet, Excel)
+- Streaming sources (Kafka, Kinesis)
+
+### Transformer
+
+Transform and manipulate data from upstream blocks.
+
+```python
+from mage_ai.data_preparation.decorators import transformer
+import pandas as pd
+
+@transformer
+def transform_data(data, *args, **kwargs):
+    """
+    Transform the input data.
+    
+    Args:
+        data: Output from upstream block (DataFrame, list, etc.)
+    
+    Returns:
+        Transformed data
+    """
+    # Remove rows with missing values
+    data = data.dropna()
+    
+    # Add calculated column
+    data['total_value'] = data['quantity'] * data['price']
+    
+    # Filter data
+    data = data[data['status'] == 'active']
+    
+    return data
+
+@test
+def test_output(output, *args) -> None:
+    """
+    Test that output meets expectations.
+    """
+    assert output is not None, 'Output is undefined'
+    assert len(output) > 0, 'No data after transformation'
+    assert 'total_value' in output.columns, 'Missing calculated column'
+```
+
+### Data Exporter
+
+Export data to external destinations.
+
+```python
+from mage_ai.data_preparation.decorators import data_exporter
+
+@data_exporter
+def export_data(data, *args, **kwargs):
+    """
+    Export data to a destination.
+    
+    Args:
+        data: Output from upstream block
+    """
+    # Export to Snowflake
+    from mage_ai.io.snowflake import Snowflake
+    
+    config = {
+        'account': 'my_account',
+        'user': 'mage_user',
+        'password': os.getenv('SNOWFLAKE_PASSWORD'),
+        'database': 'analytics',
+        'schema': 'public',
+        'warehouse': 'compute_wh',
+    }
+    
+    Snowflake(**config).export(
+        data,
+        table_name='customer_summary',
+        if_exists='replace',
+    )
+```
+
+**Common Destinations:**
+- Data warehouses (Snowflake, Redshift, BigQuery)
+- Databases (PostgreSQL, MySQL, MongoDB)
+- Cloud storage (S3, GCS, Azure)
+- APIs and webhooks
+- File exports
+
+### Sensor
+
+Wait for specific conditions before proceeding with pipeline execution.
+
+```python
+from mage_ai.data_preparation.decorators import sensor
+from datetime import datetime
+
+@sensor
+def check_file_exists(*args, **kwargs):
+    """
+    Sensor that waits for a file to appear in S3.
+    
+    Returns:
+        bool: True if condition is met, False otherwise
+    """
+    import boto3
+    
+    s3 = boto3.client('s3')
+    bucket = 'my-data-bucket'
+    
+    # Check if today's file exists
+    date_str = datetime.now().strftime('%Y-%m-%d')
+    key = f'data/uploads/{date_str}/data.csv'
+    
+    try:
+        s3.head_object(Bucket=bucket, Key=key)
+        return True
+    except:
+        return False
+```
+
+**Sensor Use Cases:**
+- Wait for file availability
+- Check database table readiness
+- Monitor API endpoint status
+- Wait for upstream pipeline completion
+- Time-based conditions
+
+### Conditional
+
+Determine whether downstream blocks should execute based on conditions.
+
+```python
+from mage_ai.data_preparation.decorators import condition
+
+@condition
+def evaluate_condition(data, *args, **kwargs):
+    """
+    Conditional block that controls downstream execution.
+    
+    Args:
+        data: Output from upstream block
+    
+    Returns:
+        bool: True to continue execution, False to skip downstream
+    """
+    # Only continue if we have enough data
+    return len(data) >= 100
+```
+
+### Callback
+
+Execute code after a block completes, regardless of success or failure.
+
+```python
+from mage_ai.data_preparation.decorators import on_success, on_failure
+
+@on_success
+def send_success_notification(**kwargs):
+    """
+    Called when the parent block succeeds.
+    """
+    # Send success notification
+    import requests
+    
+    requests.post(
+        'https://hooks.slack.com/services/YOUR/WEBHOOK/URL',
+        json={'text': f'Pipeline block completed successfully'}
+    )
+
+@on_failure
+def handle_failure(**kwargs):
+    """
+    Called when the parent block fails.
+    
+    Args:
+        __error: The exception that occurred
+    """
+    error = kwargs.get('__error')
+    
+    # Log error and send alert
+    print(f'Block failed with error: {error}')
+    
+    # Send failure notification
+    import requests
+    
+    requests.post(
+        'https://hooks.slack.com/services/YOUR/WEBHOOK/URL',
+        json={'text': f'Pipeline block failed: {str(error)'}
+    )
+```
+
+### Custom
+
+General-purpose blocks for custom logic.
+
+```python
+from mage_ai.data_preparation.decorators import custom
+
+@custom
+def custom_logic(*args, **kwargs):
+    """
+    Custom block for any operation.
+    """
+    # Your custom logic here
+    pass
+```
+
+### DBT
+
+Execute dbt (data build tool) models within Mage pipelines.
+
+```yaml
+# dbt block configuration
+block_type: dbt
+language: sql
+
+# Block automatically executes dbt models
+# Configuration in dbt_project.yml
+```
+
+## Block Structure
+
+### File Organization
+
+Blocks are organized in directories by type:
+
+```
+project/
+├── data_loaders/
+│   ├── __init__.py
+│   └── load_customers.py
+├── transformers/
+│   ├── __init__.py
+│   ├── clean_data.py
+│   └── aggregate_metrics.py
+├── data_exporters/
+│   ├── __init__.py
+│   └── export_to_warehouse.py
+├── sensors/
+│   ├── __init__.py
+│   └── wait_for_file.py
+└── custom/
+    ├── __init__.py
+    └── custom_logic.py
+```
+
+### Block Configuration
+
+Each block has configuration stored in the pipeline's `metadata.yaml`:
+
+```yaml
+blocks:
+- uuid: load_customers
+  type: data_loader
+  language: python
+  upstream_blocks: []
+  downstream_blocks:
+  - clean_data
+  executor_type: local_python
+  executor_config: {}
+  retry_config:
+    retries: 3
+    delay: 5
+    exponential_backoff: true
+  timeout: 300
+  configuration:
+    file_path: data_loaders/load_customers.py
+```
+
+## Block Properties
+
+<ParamField path="uuid" type="string" required>
+  Unique identifier for the block
+</ParamField>
+
+<ParamField path="type" type="BlockType" required>
+  Type of block: `data_loader`, `transformer`, `data_exporter`, `sensor`, `conditional`, `callback`, `custom`, `dbt`
+</ParamField>
+
+<ParamField path="language" type="BlockLanguage">
+  Programming language: `python`, `sql`, `r`, `yaml`, `markdown`
+</ParamField>
+
+<ParamField path="upstream_blocks" type="List[str]">
+  List of block UUIDs that must execute before this block
+</ParamField>
+
+<ParamField path="downstream_blocks" type="List[str]">
+  List of block UUIDs that depend on this block
+</ParamField>
+
+<ParamField path="executor_type" type="ExecutorType">
+  Where to execute the block: `local_python`, `k8s`, `ecs`, `gcp_cloud_run`, `pyspark`
+</ParamField>
+
+<ParamField path="retry_config" type="Dict">
+  Retry configuration for block failures
+</ParamField>
+
+<ParamField path="timeout" type="int">
+  Maximum execution time in seconds
+</ParamField>
+
+## Creating Blocks
+
+### Programmatic Creation
+
+```python
+from mage_ai.data_preparation.models.block import Block
+from mage_ai.data_preparation.models.constants import BlockType
+
+# Create a data loader block
+loader = Block.create(
+    name='load_sales_data',
+    block_type=BlockType.DATA_LOADER,
+    repo_path='/home/src/my_project',
+    language='python',
+    pipeline=pipeline
+)
+
+# Create a transformer with upstream dependency
+transformer = Block.create(
+    name='clean_sales_data',
+    block_type=BlockType.TRANSFORMER,
+    repo_path='/home/src/my_project',
+    pipeline=pipeline,
+    upstream_block_uuids=['load_sales_data']
+)
+
+# Create an exporter
+exporter = Block.create(
+    name='export_to_s3',
+    block_type=BlockType.DATA_EXPORTER,
+    repo_path='/home/src/my_project',
+    pipeline=pipeline,
+    upstream_block_uuids=['clean_sales_data'],
+    configuration={
+        'connector_type': 's3',
+        'bucket': 'my-data-bucket'
+    }
+)
+```
+
+## Block Dependencies
+
+### Defining Dependencies
+
+```python
+# Multiple upstream blocks
+@transformer
+def combine_data(data1, data2, data3, *args, **kwargs):
+    """
+    Receives data from three upstream blocks.
+    Arguments correspond to upstream blocks in order.
+    """
+    import pandas as pd
+    
+    # Merge data from multiple sources
+    combined = pd.concat([data1, data2, data3], ignore_index=True)
+    return combined
+```
+
+### Variable Arguments
+
+```python
+@transformer
+def process_many_inputs(*args, **kwargs):
+    """
+    Handle any number of upstream blocks with *args.
+    """
+    # args contains outputs from all upstream blocks
+    for i, data in enumerate(args):
+        print(f'Processing input {i}: {len(data)} rows')
+    
+    # Combine all inputs
+    import pandas as pd
+    combined = pd.concat(args, ignore_index=True)
+    return combined
+```
+
+## Block Execution
+
+### Execute a Single Block
+
+```python
+# Get block from pipeline
+block = pipeline.get_block('my_block_uuid')
+
+# Execute synchronously
+result = block.execute_sync(
+    global_vars={'env': 'production'},
+    analyze_outputs=True
+)
+
+print(result['output'])
+```
+
+### Execute with Custom Variables
+
+```python
+result = block.execute_sync(
+    global_vars={
+        'execution_date': '2024-01-15',
+        'env': 'production',
+        'region': 'us-west-2'
+    }
+)
+```
+
+## Tests
+
+Add tests to validate block outputs:
+
+```python
+from mage_ai.data_preparation.decorators import test
+
+@test
+def test_row_count(output, *args) -> None:
+    """Test that we have data."""
+    assert len(output) > 0, 'No rows in output'
+
+@test
+def test_columns_exist(output, *args) -> None:
+    """Test required columns exist."""
+    required_columns = ['id', 'name', 'created_at']
+    for col in required_columns:
+        assert col in output.columns, f'Missing column: {col}'
+
+@test
+def test_no_nulls(output, *args) -> None:
+    """Test for null values in critical columns."""
+    assert output['id'].notna().all(), 'Null values found in id column'
+```
+
+## Block Languages
+
+<Tabs>
+  <Tab title="Python">
+    ```python
+    from mage_ai.data_preparation.decorators import data_loader
+    import pandas as pd
+
+    @data_loader
+    def load_data(*args, **kwargs):
+        return pd.read_csv('data.csv')
+    ```
+  </Tab>
+
+  <Tab title="SQL">
+    ```sql
+    -- SQL blocks can query databases directly
+    SELECT 
+        customer_id,
+        SUM(amount) as total_amount,
+        COUNT(*) as order_count
+    FROM {{ df_1 }}  -- Reference upstream block output
+    WHERE status = 'completed'
+    GROUP BY customer_id
+    HAVING SUM(amount) > 1000
+    ```
+  </Tab>
+
+  <Tab title="R">
+    ```r
+    # R blocks for statistical analysis
+    library(dplyr)
+
+    load_data <- function() {
+        data <- read.csv('data.csv')
+        return(data)
+    }
+    ```
+  </Tab>
+</Tabs>
+
+## Best Practices
+
+<Tip>
+  **Keep Blocks Focused**
+  
+  Each block should have a single, clear responsibility. Break complex operations into multiple blocks for better modularity and testability.
+</Tip>
+
+<Note>
+  **Add Tests**
+  
+  Always add `@test` functions to validate block outputs and catch data quality issues early.
+</Note>
+
+<Warning>
+  **Block Dependencies**
+  
+  The number of arguments in your decorated function must match the number of upstream blocks (unless using `*args`).
+</Warning>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Execution" icon="play" href="/pipelines/execution">
+    Learn about execution modes and executors
+  </Card>
+  <Card title="Dynamic Blocks" icon="layer-group" href="/pipelines/dynamic-blocks">
+    Create blocks that execute in parallel
+  </Card>
+  <Card title="Scheduling" icon="clock" href="/pipelines/scheduling">
+    Schedule pipeline runs with triggers
+  </Card>
+  <Card title="Testing" icon="flask" href="/development/testing">
+    Write comprehensive tests for blocks
+  </Card>
+</CardGroup>

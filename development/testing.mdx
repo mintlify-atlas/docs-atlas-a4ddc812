@@ -1,0 +1,408 @@
+---
+title: 'Testing Blocks and Pipelines'
+description: 'Learn how to write and run tests for your data pipeline blocks'
+---
+
+## Overview
+
+Mage provides built-in testing capabilities for validating block outputs and pipeline logic. Tests run automatically after block execution or can be triggered manually.
+
+## Test Decorator
+
+Use the `@test` decorator to define test functions:
+
+```python
+if 'test' not in globals():
+    from mage_ai.data_preparation.decorators import test
+
+@test
+def test_output(output, *args) -> None:
+    """
+    Test the output of your block.
+    
+    Args:
+        output: The first output from your block
+        *args: Additional outputs if your block returns multiple values
+    """
+    assert output is not None, 'The output is undefined'
+```
+
+<Note>
+  Tests are automatically included when you create a new block from the default template.
+</Note>
+
+## Test Execution Flow
+
+Tests run automatically after successful block execution:
+
+```python
+# From mage_ai/data_preparation/models/block/__init__.py
+
+async def execute_and_run_tests() -> None:
+    # Execute the block
+    await block.execute(
+        analyze_outputs=analyze_outputs,
+        build_block_output_stdout=build_block_output_stdout,
+        global_vars=variables,
+        run_all_blocks=True,
+        run_sensors=run_sensors,
+        update_status=update_status,
+        parallel=parallel,
+    )
+
+    # Run tests automatically
+    if run_tests:
+        block.run_tests(
+            build_block_output_stdout=build_block_output_stdout,
+            global_vars=global_vars,
+            update_tests=False,
+        )
+```
+
+## Writing Tests
+
+### Basic Assertions
+
+```python
+@data_loader
+def load_data(**kwargs):
+    df = pd.read_csv('data.csv')
+    return df
+
+@test
+def test_output(output, *args) -> None:
+    """
+    Basic output validation.
+    """
+    assert output is not None, 'The output is undefined'
+    assert len(output) > 0, 'No rows loaded'
+    assert 'user_id' in output.columns, 'Missing user_id column'
+```
+
+### Testing DataFrames
+
+```python
+import pandas as pd
+
+@test
+def test_dataframe_structure(output, *args) -> None:
+    """
+    Validate DataFrame structure and content.
+    """
+    # Check type
+    assert isinstance(output, pd.DataFrame), 'Output must be a DataFrame'
+    
+    # Check shape
+    assert output.shape[0] > 0, 'DataFrame is empty'
+    assert output.shape[1] >= 5, 'Expected at least 5 columns'
+    
+    # Check columns
+    required_columns = ['user_id', 'email', 'created_at']
+    for col in required_columns:
+        assert col in output.columns, f'Missing required column: {col}'
+    
+    # Check data types
+    assert output['user_id'].dtype == 'int64', 'user_id must be integer'
+    
+    # Check for nulls
+    assert output['email'].notna().all(), 'email column has null values'
+```
+
+### Testing Multiple Outputs
+
+```python
+@data_loader  
+def load_multiple_datasets(**kwargs):
+    users = pd.read_csv('users.csv')
+    orders = pd.read_csv('orders.csv')
+    return [users, orders]
+
+@test
+def test_users_output(output, *args) -> None:
+    """
+    Test the first output (users).
+    """
+    assert len(output) > 0, 'No users loaded'
+    assert 'user_id' in output.columns, 'Missing user_id'
+
+@test
+def test_orders_output(output, *args) -> None:
+    """
+    Test the second output (orders).
+    """
+    orders = args[0]  # Second output
+    assert len(orders) > 0, 'No orders loaded'
+    assert 'order_id' in orders.columns, 'Missing order_id'
+```
+
+### Testing with Global Variables
+
+```python
+@test
+def test_with_context(output, *args, **kwargs) -> None:
+    """
+    Access global variables in tests.
+    
+    Args:
+        output: Block output
+        *args: Additional outputs  
+        **kwargs: Global variables
+    """
+    env = kwargs.get('env', 'dev')
+    
+    if env == 'prod':
+        # Stricter validation in production
+        assert len(output) >= 1000, 'Production data too small'
+    else:
+        assert len(output) > 0, 'Dev data present'
+```
+
+## Test Function Signature
+
+Tests use a specific signature to receive outputs and variables:
+
+```python
+# From mage_ai/data_preparation/models/block/__init__.py
+
+def run_tests(
+    self,
+    build_block_output_stdout: Callable[..., object] = None,
+    custom_code: str = None,
+    execution_partition: str = None,
+    from_notebook: bool = False,
+    global_vars: Dict = None,
+    logger: Logger = None,
+    logging_tags: Dict = None,
+    outputs: List[Any] = None,
+    update_tests: bool = True,
+    dynamic_block_index: int = None,
+    dynamic_block_uuid: str = None,
+    **kwargs,
+) -> None:
+    # Load test functions
+    test_functions = []
+    if update_tests:
+        results = {
+            'test': self._block_decorator(test_functions),
+        }
+        exec(custom_code or file.read(), results)
+    
+    # Get block outputs
+    if outputs is None:
+        outputs = self.get_raw_outputs(
+            dynamic_block_uuid or self.uuid,
+            execution_partition=execution_partition,
+            from_notebook=from_notebook,
+            global_vars=global_vars,
+        )
+    
+    # Run each test function
+    for func in test_functions:
+        sig = signature(func)
+        has_kwargs = any([
+            p.kind == p.VAR_KEYWORD for p in sig.parameters.values()
+        ])
+        
+        if has_kwargs and global_vars is not None:
+            func(*outputs, **global_vars)
+        else:
+            func(*outputs)
+```
+
+## Test Execution Results
+
+Mage tracks test results and displays them in the UI:
+
+```python
+# From mage_ai/data_preparation/models/block/__init__.py
+
+tests_passed = 0
+for func in test_functions:
+    try:
+        test_function(*outputs, **global_vars)
+        tests_passed += 1
+    except AssertionError as err:
+        error_message = f'FAIL: {test_function.__name__} (block: {self.uuid})'
+        
+        if from_notebook:
+            error_json = json.dumps(
+                dict(
+                    error=str(err),
+                    message=error_message,
+                    stacktrace=stacktrace.split('\n'),
+                )
+            )
+            print(f'[__internal_test__]{error_json}')
+
+message = f'{tests_passed}/{len(test_functions)} tests passed.'
+if tests_passed != len(test_functions):
+    raise Exception(f'Failed to pass tests for block {self.uuid}')
+```
+
+## Integration Tests
+
+Test data integration blocks:
+
+```python
+# From mage_ai/data_preparation/models/block/data_integration/utils.py
+
+def test_connection(block) -> None:
+    """
+    Test connection to external data source.
+    """
+    # Test connection before running pipeline
+    try:
+        block.test_connection()
+    except Exception as e:
+        raise Exception(f'Connection test failed: {str(e)}')
+```
+
+## Advanced Testing Patterns
+
+### Data Quality Tests
+
+```python
+@test
+def test_data_quality(output, *args) -> None:
+    """
+    Comprehensive data quality checks.
+    """
+    df = output
+    
+    # Completeness
+    null_percentage = df.isnull().sum() / len(df) * 100
+    assert null_percentage.max() < 5, 'Too many null values'
+    
+    # Uniqueness
+    assert df['user_id'].is_unique, 'user_id must be unique'
+    
+    # Range validation
+    assert df['age'].between(0, 120).all(), 'Invalid age values'
+    
+    # Consistency
+    assert (df['order_date'] <= pd.Timestamp.now()).all(), 'Future dates detected'
+```
+
+### Schema Validation
+
+```python
+from typing import Dict, Any
+
+def validate_schema(df: pd.DataFrame, schema: Dict[str, Any]) -> None:
+    """
+    Validate DataFrame against expected schema.
+    """
+    for col, dtype in schema.items():
+        assert col in df.columns, f'Missing column: {col}'
+        assert df[col].dtype == dtype, f'{col} has wrong type'
+
+@test
+def test_schema(output, *args) -> None:
+    expected_schema = {
+        'user_id': 'int64',
+        'email': 'object',
+        'created_at': 'datetime64[ns]',
+        'is_active': 'bool',
+    }
+    validate_schema(output, expected_schema)
+```
+
+### Performance Tests
+
+```python
+import time
+
+@test
+def test_performance(output, *args, **kwargs) -> None:
+    """
+    Validate execution performance.
+    """
+    # Check execution time (available in kwargs)
+    execution_time = kwargs.get('execution_time', 0)
+    assert execution_time < 60, f'Execution too slow: {execution_time}s'
+    
+    # Check output size
+    memory_usage = output.memory_usage(deep=True).sum() / 1024**2  # MB
+    assert memory_usage < 500, f'Output too large: {memory_usage}MB'
+```
+
+## Running Tests
+
+<Steps>
+  <Step title="Automatic execution">
+    Tests run automatically after block execution in the notebook UI
+  </Step>
+  
+  <Step title="Manual execution">
+    Use the "Run tests" button in the UI to run tests without re-executing the block
+  </Step>
+  
+  <Step title="Pipeline execution">
+    Tests run during scheduled pipeline runs if enabled in trigger configuration
+  </Step>
+  
+  <Step title="CLI execution">
+    Run tests via CLI: `mage run [pipeline] --test`
+  </Step>
+</Steps>
+
+## Test Configuration
+
+Configure test behavior:
+
+```python
+# Disable automatic test execution
+run_tests=False
+
+# Skip tests for specific blocks
+if block.type in [BlockType.DATA_LOADER, BlockType.DATA_EXPORTER]:
+    return  # Skip tests
+```
+
+## Best Practices
+
+<Tip>
+  **Write multiple small tests**: Create separate test functions for different aspects rather than one large test.
+</Tip>
+
+<Tip>
+  **Test business logic**: Focus on validating business rules and data quality, not just technical assertions.
+</Tip>
+
+<Tip>
+  **Use descriptive assertions**: Include clear error messages in assertions to help debug failures.
+</Tip>
+
+<Warning>
+  Tests should be fast. Avoid expensive operations in test functions - test the output, not the process.
+</Warning>
+
+<Warning>
+  Failed tests will prevent pipeline execution from completing. Ensure tests are reliable.
+</Warning>
+
+## Debugging Test Failures
+
+When tests fail:
+
+1. Check the test output in the block logs
+2. View the assertion error message
+3. Inspect the block output in the notebook
+4. Use the logger for detailed debugging:
+
+```python
+@test
+def test_with_logging(output, *args, **kwargs) -> None:
+    logger = kwargs.get('logger')
+    if logger:
+        logger.info(f'Testing output with shape: {output.shape}')
+        logger.debug(f'First row: {output.iloc[0].to_dict()}')
+    
+    assert len(output) > 0, 'Empty output'
+```
+
+## Next Steps
+
+- Learn about [debugging and logging](/development/debugging)
+- Understand [variables and data flow](/development/variables)
+- Explore [writing block code](/development/writing-code)

@@ -1,0 +1,843 @@
+---
+title: "Kubernetes Executor"
+sidebarTitle: "Kubernetes"
+icon: "dharmachakra"
+description: "Execute Mage pipelines and blocks as Kubernetes Jobs with full resource control and isolation"
+---
+
+The Kubernetes executor enables running Mage pipelines and individual blocks as Kubernetes Jobs, providing resource isolation, scalability, and fine-grained control over compute resources.
+
+## Overview
+
+Mage's Kubernetes integration creates dynamic Kubernetes Jobs for pipeline runs and block executions. Each job runs in an isolated container with configurable resources, allowing you to:
+
+- Scale pipeline execution across your Kubernetes cluster
+- Isolate resource-intensive blocks
+- Configure CPU, memory, and GPU resources per block
+- Use node selectors, affinities, and tolerations
+- Manage secrets and environment variables
+
+<Note>
+The K8s executor is implemented in `mage_ai/data_preparation/executors/k8s_block_executor.py` and `k8s_pipeline_executor.py`.
+</Note>
+
+## Prerequisites
+
+<Steps>
+  <Step title="Kubernetes Cluster">
+    You need a running Kubernetes cluster with:
+    - `kubectl` configured and authenticated
+    - Sufficient resources for job execution
+    - Network access between Mage pods and worker jobs
+  </Step>
+  
+  <Step title="Mage Deployed on Kubernetes">
+    Mage must be running as a pod in the Kubernetes cluster with:
+    - Service account with job creation permissions
+    - RBAC roles configured
+    - Access to shared storage (PVC or volume mounts)
+  </Step>
+  
+  <Step title="Install Dependencies">
+    Kubernetes client library is included in the `all` extras:
+    
+    ```bash
+    pip install "mage-ai[all]"
+    ```
+    
+    This installs `kubernetes==33.1.0`
+  </Step>
+</Steps>
+
+## Kubernetes Setup
+
+### RBAC Configuration
+
+Create the necessary RBAC resources (from `kube/app.yaml`):
+
+```yaml kube/app.yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: mage-user
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  namespace: default
+  name: job-manager
+rules:
+- apiGroups: [""] # "" indicates the core API group
+  resources: ["pods"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: ["batch", "extensions"]
+  resources: ["jobs", "jobs/status"]
+  verbs: ["create", "delete", "get"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: mage-job-manager
+  namespace: default
+subjects:
+- kind: ServiceAccount
+  name: mage-user
+  namespace: default
+roleRef:
+  kind: Role
+  name: job-manager
+  apiGroup: rbac.authorization.k8s.io
+```
+
+Apply the configuration:
+
+```bash
+kubectl apply -f kube/app.yaml
+```
+
+### Deploy Mage Pod
+
+```yaml kube/app.yaml (continued)
+apiVersion: v1
+kind: Pod
+metadata:
+  name: mage-server
+spec:
+  containers:
+  - name: mage-server
+    image: mageai/mageai:latest
+    ports:
+    - containerPort: 6789
+    volumeMounts:
+    - name: mage-fs
+      mountPath: /home/src
+    env:
+      - name: KUBE_NAMESPACE
+        valueFrom:
+          fieldRef:
+            fieldPath: metadata.namespace
+  volumes:
+  - name: mage-fs
+    hostPath:
+      path: /path/to/mage_project
+  serviceAccountName: mage-user
+```
+
+<Warning>
+Using `hostPath` is suitable for single-node development clusters. For production, use PersistentVolumeClaims (PVC) or cloud storage.
+</Warning>
+
+## Configuration
+
+### Project-Level Configuration
+
+Configure Kubernetes executor defaults in your project's `metadata.yaml`:
+
+```yaml metadata.yaml
+# Set K8s as default executor
+executor_type: k8s
+
+# Kubernetes executor configuration
+k8s_executor_config:
+  # Job name prefix (supports template variables)
+  job_name_prefix: "mage-job"
+  
+  # Namespace for jobs
+  namespace: "default"
+  
+  # Service account for jobs
+  service_account_name: "mage-user"
+  
+  # Resource requests (minimum guaranteed resources)
+  resource_requests:
+    cpu: "500m"
+    memory: "512Mi"
+  
+  # Resource limits (maximum allowed resources)
+  resource_limits:
+    cpu: "2000m"
+    memory: "2Gi"
+  
+  # Container configuration
+  container_config:
+    name: "mage-job-container"
+    image: "mageai/mageai:latest"
+    image_pull_policy: "IfNotPresent"
+```
+
+### Advanced Configuration
+
+For more granular control, use the detailed configuration format (from `mage_ai/services/k8s/config.py`):
+
+<CodeGroup>
+```yaml Full Configuration
+k8s_executor_config:
+  # Job metadata
+  metadata:
+    namespace: "default"
+    labels:
+      app: "mage"
+      environment: "production"
+    annotations:
+      description: "Mage pipeline execution job"
+  
+  # Container spec
+  container:
+    name: "mage-job-container"
+    image: "mageai/mageai:latest"
+    image_pull_policy: "IfNotPresent"
+    
+    # Environment variables
+    env:
+      - name: "ENV_VAR_NAME"
+        value: "value"
+      - name: "SECRET_VAR"
+        valueFrom:
+          secretKeyRef:
+            name: "mage-secrets"
+            key: "api-key"
+    
+    # Volume mounts
+    volume_mounts:
+      - name: "mage-data"
+        mountPath: "/home/src"
+      - name: "config"
+        mountPath: "/app/config"
+        readOnly: true
+    
+    # Resource requirements
+    resources:
+      requests:
+        cpu: "1000m"
+        memory: "2Gi"
+      limits:
+        cpu: "4000m"
+        memory: "8Gi"
+  
+  # Pod spec
+  pod:
+    service_account_name: "mage-user"
+    
+    # Node selector
+    node_selector:
+      workload-type: "data-processing"
+      instance-type: "memory-optimized"
+    
+    # Tolerations
+    tolerations:
+      - key: "dedicated"
+        operator: "Equal"
+        value: "data-jobs"
+        effect: "NoSchedule"
+    
+    # Affinity rules
+    affinity:
+      nodeAffinity:
+        requiredDuringSchedulingIgnoredDuringExecution:
+          nodeSelectorTerms:
+          - matchExpressions:
+            - key: "kubernetes.io/arch"
+              operator: "In"
+              values:
+              - "amd64"
+      podAntiAffinity:
+        preferredDuringSchedulingIgnoredDuringExecution:
+        - weight: 100
+          podAffinityTerm:
+            labelSelector:
+              matchExpressions:
+              - key: "app"
+                operator: "In"
+                values:
+                - "mage"
+            topologyKey: "kubernetes.io/hostname"
+    
+    # Scheduler name
+    scheduler_name: "default-scheduler"
+    
+    # Volumes
+    volumes:
+      - name: "mage-data"
+        persistentVolumeClaim:
+          claimName: "mage-pvc"
+      - name: "config"
+        configMap:
+          name: "mage-config"
+    
+    # Image pull secrets
+    image_pull_secrets: "docker-registry-secret"
+  
+  # Job spec
+  job:
+    # Maximum time for job to complete (in seconds)
+    active_deadline_seconds: 3600
+    
+    # Number of retries before marking job as failed
+    backoff_limit: 2
+    
+    # TTL for job cleanup after completion (in seconds)
+    ttl_seconds_after_finished: 86400
+```
+
+```yaml Minimal Configuration
+k8s_executor_config:
+  namespace: "default"
+  resource_requests:
+    cpu: "500m"
+    memory: "1Gi"
+  resource_limits:
+    cpu: "2000m"
+    memory: "4Gi"
+```
+</CodeGroup>
+
+### Pipeline-Level Configuration
+
+Override configuration for specific pipelines:
+
+```yaml pipelines/my_pipeline/metadata.yaml
+executor_type: k8s
+
+executor_config:
+  resource_requests:
+    cpu: "2000m"
+    memory: "4Gi"
+  resource_limits:
+    cpu: "8000m"
+    memory: "16Gi"
+  
+  # Use template variable for namespace
+  namespace: "{{ env_var('K8S_NAMESPACE') }}"
+  
+  # Dynamic job name based on trigger
+  job_name_prefix: "pipeline-{trigger_name}"
+```
+
+<Note>
+The `job_name_prefix` supports the template variable `{trigger_name}` which will be replaced with the trigger name.
+</Note>
+
+### Block-Level Configuration
+
+Configure individual blocks with specific resource requirements:
+
+```yaml Block YAML Configuration
+executor_type: k8s
+
+executor_config:
+  # Heavy computation block needs more resources
+  resource_requests:
+    cpu: "4000m"
+    memory: "8Gi"
+  resource_limits:
+    cpu: "8000m"
+    memory: "16Gi"
+  
+  # Run on GPU nodes
+  container:
+    resources:
+      requests:
+        nvidia.com/gpu: "1"
+      limits:
+        nvidia.com/gpu: "1"
+  
+  pod:
+    node_selector:
+      node-type: "gpu"
+```
+
+## Execution Flow
+
+When a block executes with the K8s executor, the following happens (from `k8s_block_executor.py:30-60`):
+
+<Steps>
+  <Step title="Load Configuration">
+    Merge configurations from project, pipeline, and block levels:
+    
+    ```python
+    executor_config_dict = pipeline.repo_config.k8s_executor_config or dict()
+    if block.executor_config is not None:
+        executor_config_dict = merge_dict(
+            executor_config_dict,
+            block.executor_config,
+        )
+    ```
+  </Step>
+  
+  <Step title="Create Job Name">
+    Generate unique job name:
+    
+    ```python
+    job_name = f'{MAGE_CLUSTER_UUID}-{job_name_prefix}-block-{block_run_id}'
+    ```
+  </Step>
+  
+  <Step title="Build Job Spec">
+    Create Kubernetes Job specification with:
+    - Pod template from Mage server pod
+    - Command to execute the block
+    - Resource requirements
+    - Environment variables
+    - Volume mounts
+  </Step>
+  
+  <Step title="Submit Job">
+    Create the job in Kubernetes:
+    
+    ```python
+    batch_api_client.create_namespaced_job(
+        body=job,
+        namespace=namespace,
+    )
+    ```
+  </Step>
+  
+  <Step title="Monitor Execution">
+    Poll job status every 5 seconds until completion:
+    
+    ```python
+    while not job_completed:
+        api_response = batch_api_client.read_namespaced_job(
+            name=job_name,
+            namespace=namespace
+        )
+        if api_response.status.succeeded or api_response.status.failed:
+            job_completed = True
+        time.sleep(5)
+    ```
+  </Step>
+  
+  <Step title="Cleanup">
+    Delete the job after completion (controlled by `ttl_seconds_after_finished`)
+  </Step>
+</Steps>
+
+## Job Manager
+
+The K8s Job Manager handles job lifecycle (from `mage_ai/services/k8s/job_manager.py`):
+
+### Configuration Inheritance
+
+Jobs automatically inherit configuration from the Mage server pod:
+
+```python
+def merge_pod_spec(pod_spec, command):
+    # Inherit from Mage server pod:
+    # - Environment variables
+    # - Volume mounts
+    # - Tolerations (if not overridden)
+    # - Node selector (if not overridden)
+    # - Image pull secrets
+    # - Scheduler name
+    
+    mage_server_pod_spec = pod_config.spec
+    pod_spec.volumes.extend(mage_server_pod_spec.volumes)
+    
+    if not pod_spec.tolerations:
+        pod_spec.tolerations = mage_server_pod_spec.tolerations
+```
+
+### Volume Optimization
+
+The job manager automatically filters volumes to only include those referenced by volume mounts:
+
+```python
+def filter_used_volumes(pod_spec):
+    used_volume_names = {vm.name for vm in pod_spec.containers[0].volume_mounts}
+    pod_spec.volumes = [vol for vol in pod_spec.volumes if vol.name in used_volume_names]
+```
+
+## Environment Variables
+
+The Mage server pod must have these environment variables:
+
+```yaml
+env:
+  - name: KUBE_POD_NAME
+    valueFrom:
+      fieldRef:
+        fieldPath: metadata.name
+  - name: KUBE_NAMESPACE
+    valueFrom:
+      fieldRef:
+        fieldPath: metadata.namespace
+```
+
+These are used to discover the current pod configuration and inherit settings.
+
+## Storage Configuration
+
+For production deployments, use PersistentVolumeClaims:
+
+<CodeGroup>
+```yaml PVC Definition
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: mage-pvc
+spec:
+  accessModes:
+    - ReadWriteMany  # Required for multiple pods
+  resources:
+    requests:
+      storage: 100Gi
+  storageClassName: "standard"  # Or your preferred storage class
+```
+
+```yaml Use in Pod
+volumes:
+- name: mage-data
+  persistentVolumeClaim:
+    claimName: mage-pvc
+```
+
+```yaml Use in K8s Config
+k8s_executor_config:
+  pod:
+    volumes:
+      - name: mage-data
+        persistentVolumeClaim:
+          claimName: mage-pvc
+  container:
+    volume_mounts:
+      - name: mage-data
+        mountPath: /home/src
+```
+</CodeGroup>
+
+<Warning>
+The PVC must use `ReadWriteMany` (RWX) access mode since both the Mage server pod and job pods need to access the same files.
+</Warning>
+
+## Resource Management
+
+### CPU and Memory
+
+Configure resources using Kubernetes resource syntax:
+
+```yaml
+resources:
+  requests:
+    cpu: "1000m"      # 1 CPU core (1000 millicores)
+    memory: "2Gi"     # 2 GiB of memory
+  limits:
+    cpu: "4000m"      # Maximum 4 CPU cores
+    memory: "8Gi"     # Maximum 8 GiB of memory
+```
+
+**Units:**
+- CPU: millicores (`m`) or cores (e.g., `500m` = 0.5 cores, `2` = 2 cores)
+- Memory: `Mi` (mebibytes), `Gi` (gibibytes), `M` (megabytes), `G` (gigabytes)
+
+### GPU Resources
+
+For GPU-accelerated workloads:
+
+```yaml
+k8s_executor_config:
+  container:
+    resources:
+      requests:
+        nvidia.com/gpu: "1"
+      limits:
+        nvidia.com/gpu: "1"
+  pod:
+    node_selector:
+      accelerator: "nvidia-tesla-v100"
+```
+
+### Node Selection
+
+Control which nodes run your jobs:
+
+<CodeGroup>
+```yaml Node Selector
+pod:
+  node_selector:
+    workload-type: "data-processing"
+    instance-type: "memory-optimized"
+```
+
+```yaml Node Affinity
+pod:
+  affinity:
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+        - matchExpressions:
+          - key: "node.kubernetes.io/instance-type"
+            operator: "In"
+            values:
+            - "r5.2xlarge"
+            - "r5.4xlarge"
+```
+
+```yaml Tolerations
+pod:
+  tolerations:
+    - key: "dedicated"
+      operator: "Equal"
+      value: "data-jobs"
+      effect: "NoSchedule"
+```
+</CodeGroup>
+
+## Namespace Configuration
+
+The namespace can be configured with template variables:
+
+```yaml
+k8s_executor_config:
+  # Use environment variable
+  namespace: "{{ env_var('K8S_NAMESPACE') }}"
+  
+  # Or use global variables at runtime
+  # namespace will be rendered with pipeline global_vars
+```
+
+The namespace is resolved at runtime (from `k8s_block_executor.py:38-44`):
+
+```python
+if self.executor_config.namespace:
+    namespace = Template(self.executor_config.namespace).render(
+        variables=lambda x: global_vars.get(x) if global_vars else None,
+        **get_template_vars()
+    )
+else:
+    namespace = DEFAULT_NAMESPACE
+```
+
+## Secrets Management
+
+Pass secrets to jobs using Kubernetes Secrets:
+
+<Steps>
+  <Step title="Create Secret">
+    ```bash
+    kubectl create secret generic mage-secrets \
+      --from-literal=api-key=your-secret-key \
+      --from-literal=db-password=your-password
+    ```
+  </Step>
+  
+  <Step title="Reference in Configuration">
+    ```yaml
+    k8s_executor_config:
+      container:
+        env:
+          - name: API_KEY
+            valueFrom:
+              secretKeyRef:
+                name: mage-secrets
+                key: api-key
+          - name: DB_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: mage-secrets
+                key: db-password
+    ```
+  </Step>
+</Steps>
+
+## Monitoring and Debugging
+
+### View Job Status
+
+```bash
+# List all jobs
+kubectl get jobs -n default
+
+# Describe specific job
+kubectl describe job <job-name> -n default
+
+# View job logs
+kubectl logs job/<job-name> -n default
+```
+
+### Common Issues
+
+<AccordionGroup>
+  <Accordion title="Job creation fails with permission denied">
+    Verify RBAC configuration:
+    
+    ```bash
+    # Check service account
+    kubectl get serviceaccount mage-user -n default
+    
+    # Check role binding
+    kubectl get rolebinding mage-job-manager -n default
+    
+    # Verify permissions
+    kubectl auth can-i create jobs --as=system:serviceaccount:default:mage-user
+    ```
+  </Accordion>
+  
+  <Accordion title="Job pods stuck in Pending state">
+    Common causes:
+    - Insufficient cluster resources
+    - Node selector not matching any nodes
+    - PVC not bound
+    - Image pull errors
+    
+    Debug:
+    ```bash
+    kubectl describe pod <pod-name>
+    kubectl get events --sort-by='.lastTimestamp'
+    ```
+  </Accordion>
+  
+  <Accordion title="Volume mount errors">
+    Ensure:
+    - PVC exists and is bound
+    - Access mode is ReadWriteMany
+    - Storage class supports RWX
+    - Volume mounts reference existing volumes
+  </Accordion>
+  
+  <Accordion title="Job succeeds but block fails">
+    Check:
+    - Job logs: `kubectl logs job/<job-name>`
+    - Exit code: `kubectl get pod <pod-name> -o jsonpath='{.status.containerStatuses[0].state.terminated.exitCode}'`
+    - Mage server logs for job manager errors
+  </Accordion>
+</AccordionGroup>
+
+## Best Practices
+
+1. **Resource Requests vs Limits**
+   - Set requests to typical usage for better scheduling
+   - Set limits higher to handle peaks without OOM kills
+   - Monitor actual usage and adjust accordingly
+
+2. **Job Cleanup**
+   - Configure `ttl_seconds_after_finished` to auto-delete completed jobs
+   - Set to 86400 (24 hours) for debugging, lower for production
+   - Use `backoff_limit: 0` to prevent automatic retries if not needed
+
+3. **Storage Strategy**
+   - Use PVCs with RWX for shared storage
+   - Consider NFS, EFS (AWS), or Filestore (GCP) for multi-pod access
+   - Use separate PVCs for data vs. code if possible
+
+4. **Node Selection**
+   - Use node selectors for predictable placement
+   - Use taints and tolerations for dedicated node pools
+   - Consider pod affinity/anti-affinity for performance
+
+5. **Security**
+   - Use separate service accounts for different pipeline types
+   - Implement RBAC with least privilege
+   - Store credentials in Kubernetes Secrets
+   - Use Pod Security Policies or Pod Security Standards
+
+6. **Monitoring**
+   - Enable resource metrics: `kubectl top pods`
+   - Set up alerts for job failures
+   - Monitor job completion times
+   - Track resource utilization vs. requests/limits
+
+## Production Deployment Example
+
+Complete production-ready configuration:
+
+<CodeGroup>
+```yaml metadata.yaml
+executor_type: k8s
+
+k8s_executor_config:
+  job_name_prefix: "mage-{trigger_name}"
+  
+  metadata:
+    namespace: "data-pipelines"
+    labels:
+      app: "mage"
+      environment: "production"
+      team: "data"
+  
+  container:
+    image: "your-registry/mageai:v1.0.0"
+    image_pull_policy: "Always"
+    
+    env:
+      - name: "ENVIRONMENT"
+        value: "production"
+      - name: "DB_PASSWORD"
+        valueFrom:
+          secretKeyRef:
+            name: "mage-db-secrets"
+            key: "password"
+    
+    resources:
+      requests:
+        cpu: "1000m"
+        memory: "2Gi"
+      limits:
+        cpu: "4000m"
+        memory: "8Gi"
+    
+    volume_mounts:
+      - name: "mage-data"
+        mountPath: "/home/src"
+  
+  pod:
+    service_account_name: "mage-production"
+    
+    node_selector:
+      workload-type: "data-processing"
+    
+    tolerations:
+      - key: "data-pipelines"
+        operator: "Equal"
+        value: "true"
+        effect: "NoSchedule"
+    
+    volumes:
+      - name: "mage-data"
+        persistentVolumeClaim:
+          claimName: "mage-data-pvc"
+    
+    image_pull_secrets: "docker-registry"
+  
+  job:
+    active_deadline_seconds: 7200
+    backoff_limit: 1
+    ttl_seconds_after_finished: 3600
+```
+
+```bash Deploy
+# Apply RBAC
+kubectl apply -f rbac.yaml
+
+# Create PVC
+kubectl apply -f pvc.yaml
+
+# Deploy Mage
+kubectl apply -f mage-deployment.yaml
+
+# Verify
+kubectl get pods -n data-pipelines
+kubectl logs -f <mage-pod-name> -n data-pipelines
+```
+</CodeGroup>
+
+## Related Resources
+
+<CardGroup cols={2}>
+  <Card title="Compute Overview" icon="server" href="/integrations/compute/overview">
+    Overview of all compute integrations
+  </Card>
+  
+  <Card title="Spark Integration" icon="sparkles" href="/integrations/compute/spark">
+    Distributed data processing with PySpark
+  </Card>
+  
+  <Card title="Kubernetes Docs" icon="book" href="https://kubernetes.io/docs/">
+    Official Kubernetes documentation
+  </Card>
+  
+  <Card title="K8s Jobs" icon="briefcase" href="https://kubernetes.io/docs/concepts/workloads/controllers/job/">
+    Kubernetes Jobs documentation
+  </Card>
+</CardGroup>

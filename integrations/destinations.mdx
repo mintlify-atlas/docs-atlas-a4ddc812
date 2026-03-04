@@ -1,0 +1,498 @@
+---
+title: 'Data Destinations'
+description: 'Available destinations for loading your data'
+---
+
+Mage supports 25+ data destinations including data warehouses, databases, search engines, and cloud storage. Each destination handles schema management, type conversion, and conflict resolution.
+
+## Data Warehouse Destinations
+
+Load data into modern cloud data warehouses with automatic schema creation and updates.
+
+<CardGroup cols={2}>
+  <Card title="BigQuery" icon="google">
+    Google BigQuery with batch loading support
+  </Card>
+  <Card title="Snowflake" icon="snowflake">
+    Snowflake data warehouse with partitioning
+  </Card>
+  <Card title="Redshift" icon="aws">
+    Amazon Redshift with COPY optimization
+  </Card>
+  <Card title="Trino" icon="database">
+    Distributed SQL query engine
+  </Card>
+</CardGroup>
+
+### BigQuery
+
+Load data into Google BigQuery datasets with automatic schema management.
+
+**Configuration:**
+
+```json
+{
+  "project_id": "my-gcp-project",
+  "dataset": "raw_data",
+  "path_to_credentials_json_file": "/path/to/credentials.json",
+  "location": "US"
+}
+```
+
+**Advanced Options:**
+
+```json
+{
+  "project_id": "my-gcp-project",
+  "dataset": "analytics",
+  "credentials_info": {
+    "type": "service_account",
+    "project_id": "my-project",
+    "private_key_id": "key-id",
+    "private_key": "-----BEGIN PRIVATE KEY-----\\n..."
+  },
+  "use_batch_load": true,
+  "disable_update_column_types": false
+}
+```
+
+**Features:**
+- Automatic table creation and schema updates
+- Batch loading with Parquet/CSV formats
+- Partition support based on date columns
+- Upsert operations with unique constraints
+- Handles JSON and ARRAY column types
+
+**Example:**
+
+```python
+from mage_integrations.destinations.bigquery import BigQuery
+
+destination = BigQuery(
+    config={
+        'project_id': 'my-project',
+        'dataset': 'raw_data',
+        'path_to_credentials_json_file': './credentials.json',
+    }
+)
+
+# Process records
+destination.process_record(
+    stream='users',
+    schema=schema,
+    record={
+        'id': 1,
+        'name': 'John Doe',
+        'created_at': '2024-01-01T00:00:00Z',
+    }
+)
+```
+
+### Snowflake
+
+Write data to Snowflake with support for various authentication methods.
+
+**Configuration:**
+
+```json
+{
+  "account": "xy12345.us-east-1",
+  "warehouse": "LOADING_WH",
+  "database": "ANALYTICS",
+  "schema": "RAW_DATA",
+  "username": "MAGE_LOADER",
+  "password": "secure_password",
+  "role": "LOADER"
+}
+```
+
+**Private Key Authentication:**
+
+```json
+{
+  "account": "xy12345.us-east-1",
+  "warehouse": "LOADING_WH",
+  "database": "ANALYTICS",
+  "schema": "RAW_DATA",
+  "username": "MAGE_LOADER",
+  "private_key_file": "/path/to/rsa_key.p8",
+  "private_key_file_pwd": "key_password"
+}
+```
+
+**Features:**
+- Auto-creates tables and updates schemas
+- Supports VARIANT type for JSON data
+- Efficient bulk loading
+- Handle updates with MERGE statements
+
+### Redshift
+
+Load data into Amazon Redshift with optimized COPY commands.
+
+**Configuration:**
+
+```json
+{
+  "host": "redshift-cluster.xyz.us-west-2.redshift.amazonaws.com",
+  "port": 5439,
+  "database": "analytics",
+  "schema": "public",
+  "username": "mage_user",
+  "password": "password",
+  "aws_access_key_id": "AKIAIOSFODNN7EXAMPLE",
+  "aws_secret_access_key": "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+}
+```
+
+## Database Destinations
+
+Write to operational databases with transaction support.
+
+<CardGroup cols={2}>
+  <Card title="PostgreSQL" icon="elephant">
+    PostgreSQL with COPY support
+  </Card>
+  <Card title="MySQL" icon="database">
+    MySQL with bulk insert optimization
+  </Card>
+  <Card title="Microsoft SQL Server" icon="microsoft">
+    MSSQL with BULK INSERT
+  </Card>
+  <Card title="OracleDB" icon="database">
+    Oracle database integration
+  </Card>
+</CardGroup>
+
+### PostgreSQL
+
+Load data into PostgreSQL databases.
+
+**Configuration:**
+
+```json
+{
+  "host": "localhost",
+  "port": 5432,
+  "database": "warehouse",
+  "schema": "raw_data",
+  "username": "mage_loader",
+  "password": "password",
+  "ssl_mode": "prefer"
+}
+```
+
+**Features:**
+- COPY command for fast bulk loading
+- ON CONFLICT for upsert operations
+- SSH tunnel support
+- Schema auto-creation
+
+### MySQL
+
+Write to MySQL databases with bulk insert support.
+
+**Configuration:**
+
+```json
+{
+  "host": "localhost",
+  "port": 3306,
+  "database": "analytics",
+  "username": "mage",
+  "password": "password",
+  "charset": "utf8mb4"
+}
+```
+
+## NoSQL & Search Destinations
+
+Load data into document stores and search engines.
+
+<CardGroup cols={3}>
+  <Card title="MongoDB" icon="leaf">
+    Document database with upserts
+  </Card>
+  <Card title="Elasticsearch" icon="magnifying-glass">
+    Search and analytics engine
+  </Card>
+  <Card title="Opensearch" icon="search">
+    Open-source search platform
+  </Card>
+</CardGroup>
+
+### MongoDB
+
+Write documents to MongoDB collections.
+
+**Configuration:**
+
+```json
+{
+  "host": "localhost",
+  "port": 27017,
+  "database": "analytics",
+  "collection": "events",
+  "username": "mage",
+  "password": "password",
+  "auth_source": "admin"
+}
+```
+
+### Elasticsearch
+
+Index documents in Elasticsearch for search and analytics.
+
+**Configuration:**
+
+```json
+{
+  "host": "https://elasticsearch.example.com",
+  "port": 9200,
+  "index_name": "events",
+  "username": "elastic",
+  "password": "password"
+}
+```
+
+## Cloud Storage Destinations
+
+Write data to cloud object storage in various formats.
+
+<CardGroup cols={3}>
+  <Card title="Amazon S3" icon="aws">
+    S3 buckets with Parquet/CSV
+  </Card>
+  <Card title="Google Cloud Storage" icon="google">
+    GCS with multiple format support
+  </Card>
+  <Card title="Delta Lake" icon="delta">
+    Delta Lake on S3 or Azure
+  </Card>
+</CardGroup>
+
+### Amazon S3
+
+Write files to S3 in Parquet or CSV format.
+
+**Configuration:**
+
+```json
+{
+  "aws_access_key_id": "AKIAIOSFODNN7EXAMPLE",
+  "aws_secret_access_key": "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+  "aws_region": "us-west-2",
+  "bucket": "my-data-lake",
+  "prefix": "raw/",
+  "file_format": "parquet"
+}
+```
+
+### Delta Lake
+
+Write to Delta Lake tables on S3 or Azure storage.
+
+**Delta Lake S3 Configuration:**
+
+```json
+{
+  "aws_access_key_id": "AKIAIOSFODNN7EXAMPLE",
+  "aws_secret_access_key": "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+  "aws_region": "us-west-2",
+  "bucket": "delta-lake",
+  "table_path": "tables/events"
+}
+```
+
+**Delta Lake Azure Configuration:**
+
+```json
+{
+  "account_name": "mystorageaccount",
+  "account_key": "account_key_here",
+  "container": "delta-tables",
+  "table_path": "events"
+}
+```
+
+## Streaming Destinations
+
+Publish data to message queues and streaming platforms.
+
+<Card title="Kafka" icon="kafka">
+**Description:** Write messages to Apache Kafka topics.
+
+**Configuration:**
+```json
+{
+  "bootstrap_servers": ["localhost:9092"],
+  "topic": "events",
+  "security_protocol": "PLAINTEXT"
+}
+```
+</Card>
+
+## Other Destinations
+
+<Accordion title="Clickhouse">
+**Description:** High-performance columnar database.
+
+**Configuration:**
+```json
+{
+  "host": "localhost",
+  "port": 8123,
+  "database": "default",
+  "username": "default",
+  "password": ""
+}
+```
+</Accordion>
+
+<Accordion title="Doris">
+**Description:** Apache Doris MPP database.
+
+**Configuration:**
+```json
+{
+  "host": "localhost",
+  "port": 9030,
+  "database": "analytics",
+  "username": "root",
+  "password": ""
+}
+```
+</Accordion>
+
+<Accordion title="Salesforce">
+**Description:** Write data back to Salesforce objects.
+
+**Configuration:**
+```json
+{
+  "username": "user@company.com",
+  "password": "password",
+  "security_token": "token",
+  "is_sandbox": false
+}
+```
+</Accordion>
+
+<Accordion title="Airtable">
+**Description:** Create and update Airtable records.
+
+**Configuration:**
+```json
+{
+  "api_key": "keyXXXXXXXXXXXXXX",
+  "base_id": "appXXXXXXXXXXXXXX",
+  "table_name": "Contacts"
+}
+```
+</Accordion>
+
+<Accordion title="Teradata">
+**Description:** Enterprise data warehouse.
+
+**Configuration:**
+```json
+{
+  "host": "teradata.example.com",
+  "database": "analytics",
+  "username": "mage",
+  "password": "password"
+}
+```
+</Accordion>
+
+## Complete Destination List
+
+All available destinations in Mage:
+
+- Airtable
+- Amazon S3
+- BigQuery
+- Clickhouse
+- Delta Lake (Azure)
+- Delta Lake (S3)
+- Doris
+- Elasticsearch
+- Google Cloud Storage
+- Kafka
+- Microsoft SQL Server
+- MongoDB
+- MySQL
+- Opensearch
+- OracleDB
+- PostgreSQL
+- Redshift
+- Salesforce
+- Snowflake
+- Teradata
+- Trino
+
+## Common Configuration Options
+
+### Unique Constraints & Upserts
+
+Define how to handle duplicate records:
+
+```python
+config = {
+    'unique_constraints': ['id'],  # Columns that define uniqueness
+    'unique_conflict_method': 'UPDATE',  # UPDATE or IGNORE
+}
+```
+
+### Partition Keys
+
+Optimize warehouse performance with partitioning:
+
+```python
+config = {
+    'partition_keys': ['created_date'],  # Partition by date column
+}
+```
+
+### Type Mapping
+
+Customize how data types are converted:
+
+```python
+config = {
+    'disable_update_column_types': False,  # Allow schema updates
+    'use_lowercase': True,  # Lowercase column names
+}
+```
+
+## Installation
+
+Install destination-specific dependencies:
+
+```bash
+# BigQuery
+pip install "mage-ai[bigquery]"
+
+# Snowflake
+pip install "mage-ai[snowflake]"
+
+# PostgreSQL
+pip install "mage-ai[postgres]"
+
+# Streaming (Kafka, etc.)
+pip install "mage-ai[streaming]"
+
+# All destinations
+pip install "mage-ai[all]"
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Data Sources" icon="database" href="/integrations/sources">
+    Explore available data sources
+  </Card>
+  <Card title="Custom Destinations" icon="code" href="/integrations/custom-integrations">
+    Build custom destination connectors
+  </Card>
+</CardGroup>

@@ -1,0 +1,162 @@
+---
+title: 'mage run'
+description: 'Execute a Mage pipeline or block'
+---
+
+## Overview
+
+The `mage run` command executes a pipeline or specific block from the command line, useful for automated runs, testing, and CI/CD pipelines.
+
+## Signature
+
+```bash
+mage run [PROJECT_PATH] [PIPELINE_UUID] [OPTIONS]
+```
+
+## Arguments
+
+<ParamField path="project_path" type="string" required>
+  Path of the Mage project that contains the pipeline.
+</ParamField>
+
+<ParamField path="pipeline_uuid" type="string" required>
+  UUID of the pipeline to be run.
+</ParamField>
+
+## Options
+
+<ParamField path="--test" type="boolean" default="false">
+  Specify if tests should be run during pipeline execution.
+</ParamField>
+
+<ParamField path="--block-uuid" type="string" default="None">
+  UUID of a specific block to run. If not specified, the entire pipeline will be executed.
+</ParamField>
+
+<ParamField path="--execution-partition" type="string" default="None">
+  Execution partition for the pipeline run.
+</ParamField>
+
+<ParamField path="--executor-type" type="string" default="None">
+  Type of executor to use for running the pipeline or block.
+</ParamField>
+
+<ParamField path="--callback-url" type="string" default="None">
+  Callback URL to notify upon completion (used for block runs).
+</ParamField>
+
+<ParamField path="--block-run-id" type="integer" default="None">
+  ID of the block run.
+</ParamField>
+
+<ParamField path="--pipeline-run-id" type="integer" default="None">
+  ID of the pipeline run. If specified, uses the pipeline run's variables instead of global variables.
+</ParamField>
+
+<ParamField path="--runtime-vars" type="string" default="None">
+  Specify runtime variables as a JSON string. These will overwrite the pipeline's global variables.
+  
+  Example: `'{"key": "value", "number": 123}'`
+</ParamField>
+
+<ParamField path="--skip-sensors" type="boolean" default="false">
+  Specify if the sensors should be skipped during pipeline execution.
+</ParamField>
+
+<ParamField path="--template-runtime-configuration" type="string" default="None">
+  Runtime configuration of data integration block runs as a JSON string.
+</ParamField>
+
+## Examples
+
+<CodeGroup>
+
+```bash Run entire pipeline
+mage run /path/to/project my_pipeline
+```
+
+```bash Run with tests
+mage run /path/to/project my_pipeline --test
+```
+
+```bash Run specific block
+mage run /path/to/project my_pipeline --block-uuid data_loader_block
+```
+
+```bash Run with runtime variables
+mage run /path/to/project my_pipeline --runtime-vars '{"env": "production", "batch_size": 1000}'
+```
+
+```bash Skip sensors
+mage run /path/to/project my_pipeline --skip-sensors
+```
+
+```bash Run with pipeline run ID
+mage run /path/to/project my_pipeline --pipeline-run-id 123
+```
+
+```bash Full configuration
+mage run . my_pipeline \
+  --block-uuid my_block \
+  --test \
+  --runtime-vars '{"key": "value"}' \
+  --executor-type local_python
+```
+
+</CodeGroup>
+
+## Behavior
+
+When you run `mage run`, the command:
+
+1. Sets the repository path to the specified project directory
+2. Initializes monitoring services (Sentry, New Relic if configured)
+3. Performs git sync if configured to sync on executor start
+4. Parses runtime variables from JSON string format
+5. Loads the pipeline from the project
+6. Merges global variables with runtime variables
+7. Executes either:
+   - The entire pipeline (if no `--block-uuid` specified)
+   - A specific block (if `--block-uuid` specified)
+8. Prints "Pipeline run completed." upon successful execution
+
+## Runtime Variables
+
+Runtime variables are parsed from a JSON string and merged with the pipeline's global variables. The runtime variables take precedence and will overwrite any conflicting global variables.
+
+If a `--pipeline-run-id` is specified, the command will use that pipeline run's variables as the base instead of the global variables.
+
+## Error Handling
+
+The command integrates with:
+- Sentry for error tracking (if `SENTRY_DSN` is configured)
+- New Relic for application monitoring (if configured)
+
+Errors and exceptions will be logged and reported to these services if enabled.
+
+## Implementation Details
+
+The command is implemented in `mage_ai/cli/main.py:160-276`:
+
+```python
+@app.command()
+def run(
+    project_path: str = RUN_PROJECT_PATH_DEFAULT,
+    pipeline_uuid: str = RUN_PIPELINE_UUID_DEFAULT,
+    test: bool = RUN_TEST_DEFAULT,
+    block_uuid: Union[str, None] = RUN_BLOCK_UUID_DEFAULT,
+    execution_partition: Union[str, None] = RUN_EXECUTION_PARTITION_DEFAULT,
+    executor_type: Union[str, None] = RUN_EXECUTOR_TYPE_DEFAULT,
+    callback_url: Union[str, None] = RUN_CALLBACK_URL_DEFAULT,
+    block_run_id: Union[int, None] = RUN_BLOCK_RUN_ID_DEFAULT,
+    pipeline_run_id: Union[int, None] = RUN_PIPELINE_RUN_ID_DEFAULT,
+    runtime_vars: Union[str, None] = RUN_RUNTIME_VARS_DEFAULT,
+    skip_sensors: bool = RUN_SKIP_SENSORS_DEFAULT,
+    template_runtime_configuration: Union[str, None] = RUN_TEMPLATE_RUNTIME_CONFIGURATION_DEFAULT,
+):
+    """
+    Run pipeline.
+    """
+    # Sets up monitoring, syncs git, parses variables,
+    # and executes pipeline or block using ExecutorFactory
+```

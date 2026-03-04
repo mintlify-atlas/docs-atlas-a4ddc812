@@ -1,0 +1,282 @@
+---
+title: 'Data Destinations Overview'
+description: 'Export data from Mage to databases, data warehouses, cloud storage, and streaming platforms'
+icon: 'database'
+---
+
+Mage supports exporting data to a wide range of destinations, enabling you to build comprehensive data pipelines that move data from sources to your preferred storage and analytics platforms.
+
+## Destination Categories
+
+<CardGroup cols={2}>
+  <Card title="Databases" icon="server" href="/integrations/destinations/databases">
+    Traditional relational databases including PostgreSQL, MySQL, MSSQL, and Oracle
+  </Card>
+  <Card title="Data Warehouses" icon="warehouse" href="/integrations/destinations/data-warehouses">
+    Cloud data warehouses like BigQuery, Snowflake, and Redshift
+  </Card>
+  <Card title="Cloud Storage" icon="cloud" href="/integrations/destinations/cloud-storage">
+    Object storage services including S3, GCS, and Azure Blob Storage
+  </Card>
+  <Card title="Streaming Platforms" icon="bolt" href="/integrations/destinations/streaming">
+    Real-time data streaming with Kafka and other messaging systems
+  </Card>
+</CardGroup>
+
+## All Supported Destinations
+
+Mage provides native integrations for the following destinations:
+
+### Databases
+- **PostgreSQL** - Open-source relational database
+- **MySQL** - Popular open-source database
+- **Microsoft SQL Server (MSSQL)** - Enterprise database system
+- **Oracle Database** - Enterprise-grade relational database
+- **MongoDB** - NoSQL document database
+- **ClickHouse** - Columnar database for analytics
+- **Teradata** - Enterprise data warehouse
+
+### Data Warehouses
+- **Google BigQuery** - Serverless data warehouse with ML capabilities
+- **Snowflake** - Cloud data warehouse with elastic scaling
+- **Amazon Redshift** - AWS data warehouse service
+- **Doris** - Real-time analytical database
+
+### Cloud Storage
+- **Amazon S3** - AWS object storage
+- **Google Cloud Storage (GCS)** - Google Cloud object storage
+- **Delta Lake (S3)** - Open table format on S3
+- **Delta Lake (Azure)** - Open table format on Azure Blob Storage
+
+### Search and Analytics
+- **Elasticsearch** - Search and analytics engine
+- **OpenSearch** - Open-source search and analytics
+
+### Streaming and Messaging
+- **Apache Kafka** - Distributed event streaming platform
+
+### Other Platforms
+- **Trino** - Distributed SQL query engine (Iceberg, Delta Lake connectors)
+- **Salesforce** - CRM platform
+- **Airtable** - Collaborative database platform
+
+## Common Configuration
+
+All destinations share common configuration patterns:
+
+### Connection Settings
+
+Most destinations require authentication credentials and connection details:
+
+```yaml
+host: your-host.example.com
+port: 5432
+username: your_username
+password: your_password
+database: your_database
+```
+
+### Table Configuration
+
+Specify the target schema and table:
+
+```yaml
+schema: public
+table: target_table
+```
+
+### Unique Constraints
+
+Handle duplicate records with unique constraints:
+
+<CodeGroup>
+```yaml UPDATE on conflict
+unique_conflict_method: UPDATE
+unique_constraints:
+  - user_id
+  - email
+```
+
+```yaml IGNORE on conflict
+unique_conflict_method: IGNORE
+unique_constraints:
+  - id
+```
+</CodeGroup>
+
+### Internal Columns
+
+Mage automatically adds tracking columns to all exported records:
+
+- `_mage_created_at` - Timestamp when the record was first created
+- `_mage_updated_at` - Timestamp when the record was last updated
+
+These columns help track data lineage and support incremental updates.
+
+## Configuration Methods
+
+### Via UI
+
+1. Navigate to **Pipelines** → **Edit Pipeline**
+2. Select your data exporter block
+3. Click **Data exporter** in the block configuration
+4. Choose your destination from the dropdown
+5. Fill in the required configuration fields
+
+### Via YAML
+
+Create a configuration file in your pipeline:
+
+```yaml
+connection:
+  host: warehouse.example.com
+  database: analytics
+  schema: staging
+  table: users
+  username: mage_user
+  password: "{{ env_var('DB_PASSWORD') }}"
+
+unique_constraints:
+  - user_id
+
+unique_conflict_method: UPDATE
+```
+
+### Environment Variables
+
+Store sensitive credentials as environment variables:
+
+```python
+import os
+
+config = {
+    'host': os.environ.get('DB_HOST'),
+    'password': os.environ.get('DB_PASSWORD'),
+    'database': 'production',
+}
+```
+
+## Batch vs Stream Processing
+
+<Accordion title="Batch Processing">
+  Most destinations support batch processing, where data is collected and written in batches:
+  
+  - **Better performance** - Reduced network overhead
+  - **Lower cost** - Fewer API calls and transactions
+  - **Configurable batch size** - Control memory usage
+  
+  ```python
+  # Data is automatically batched
+  @data_exporter
+  def export_data(data, *args, **kwargs):
+      # data contains multiple records
+      return data
+  ```
+</Accordion>
+
+<Accordion title="Stream Processing">
+  Some destinations support real-time streaming:
+  
+  - **Low latency** - Near real-time data delivery
+  - **Event-driven** - Process data as it arrives
+  - **Continuous updates** - Keep downstream systems in sync
+  
+  Streaming destinations include Kafka and other messaging platforms.
+</Accordion>
+
+## Performance Optimization
+
+### Batch Load Methods
+
+Several data warehouse destinations support optimized batch loading:
+
+<CodeGroup>
+```yaml BigQuery
+use_batch_load: true
+```
+
+```yaml Snowflake
+use_batch_load: true
+```
+
+```yaml Redshift
+use_merge_load: true
+```
+</CodeGroup>
+
+Batch load methods use native bulk loading features for significantly faster data ingestion.
+
+### Partitioning
+
+Partition large tables for better query performance:
+
+```yaml
+partition_keys:
+  - created_date
+  - region
+```
+
+BigQuery and other warehouses automatically create partitioned tables based on these keys.
+
+### Column Type Handling
+
+Mage automatically maps Python data types to destination-specific column types:
+
+| Python Type | PostgreSQL | BigQuery | Snowflake | Redshift |
+|------------|-----------|----------|-----------|----------|
+| str | TEXT | STRING | VARCHAR | VARCHAR |
+| int | BIGINT | INT64 | NUMBER | BIGINT |
+| float | DOUBLE PRECISION | FLOAT64 | FLOAT | DOUBLE PRECISION |
+| bool | BOOLEAN | BOOL | BOOLEAN | BOOLEAN |
+| datetime | TIMESTAMP | DATETIME | TIMESTAMP | TIMESTAMP |
+| dict | JSONB | JSON | VARIANT | VARCHAR |
+| list | ARRAY | ARRAY | ARRAY | VARCHAR |
+
+## Testing Connections
+
+All destinations support connection testing:
+
+```python
+from mage_integrations.destinations.bigquery import BigQuery
+
+config = {
+    'project_id': 'my-project',
+    'dataset': 'my_dataset',
+    'path_to_credentials_json_file': '/path/to/credentials.json',
+}
+
+destination = BigQuery(config=config)
+try:
+    destination.test_connection()
+    print('Connection successful!')
+except Exception as e:
+    print(f'Connection failed: {e}')
+```
+
+## Error Handling
+
+Mage provides detailed logging and error handling for all destinations:
+
+- **Connection errors** - Authentication and network issues
+- **Schema mismatches** - Data type incompatibilities
+- **Constraint violations** - Unique constraint and foreign key errors
+- **Permission errors** - Insufficient database privileges
+
+Check the pipeline logs for detailed error messages and stack traces.
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Database Destinations" icon="server" href="/integrations/destinations/databases">
+    Configure PostgreSQL, MySQL, MSSQL, and other databases
+  </Card>
+  <Card title="Data Warehouses" icon="warehouse" href="/integrations/destinations/data-warehouses">
+    Set up BigQuery, Snowflake, and Redshift
+  </Card>
+  <Card title="Cloud Storage" icon="cloud" href="/integrations/destinations/cloud-storage">
+    Export to S3, GCS, and Delta Lake
+  </Card>
+  <Card title="Streaming" icon="bolt" href="/integrations/destinations/streaming">
+    Stream data to Kafka and other platforms
+  </Card>
+</CardGroup>

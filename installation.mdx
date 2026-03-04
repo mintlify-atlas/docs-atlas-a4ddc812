@@ -1,0 +1,466 @@
+---
+title: Installation
+description: Detailed installation instructions for Mage using pip, Docker, or conda with platform-specific guidance
+---
+
+Mage OSS can be installed on any system that supports Python 3.9 or higher. Choose the installation method that best fits your workflow.
+
+## Requirements
+
+<Note>
+  **Python Version**: Mage requires Python 3.9 or higher
+  
+  Check your Python version:
+  ```bash
+  python --version
+  ```
+</Note>
+
+## Installation Methods
+
+<Tabs>
+  <Tab title="Docker">
+    ### Docker (Recommended)
+
+    Docker is the recommended installation method as it provides a consistent environment and includes all dependencies.
+
+    <Steps>
+      <Step title="Pull the Docker image">
+        ```bash
+        docker pull mageai/mageai:latest
+        ```
+      </Step>
+
+      <Step title="Run Mage container">
+        ```bash
+        docker run -it -p 6789:6789 -v $(pwd):/home/src mageai/mageai \
+          /app/run_app.sh mage start demo_project
+        ```
+
+        This command:
+        - Maps port `6789` to your local machine
+        - Mounts your current directory to `/home/src` in the container
+        - Creates a project called `demo_project`
+      </Step>
+
+      <Step title="Access the UI">
+        Open your browser to `http://localhost:6789`
+      </Step>
+    </Steps>
+
+    #### Docker Compose
+
+    For production deployments, use Docker Compose:
+
+    ```yaml docker-compose.yml
+    version: '3'
+    services:
+      mage:
+        image: mageai/mageai:latest
+        command: mage start demo_project
+        ports:
+          - "6789:6789"
+        volumes:
+          - .:/home/src
+        environment:
+          - USER_CODE_PATH=/home/src
+    ```
+
+    Start with:
+    ```bash
+    docker-compose up
+    ```
+
+    #### Docker with PostgreSQL
+
+    For a production setup with PostgreSQL:
+
+    ```yaml docker-compose.yml
+    version: '3'
+    services:
+      postgres:
+        image: postgres:14
+        environment:
+          POSTGRES_DB: mage
+          POSTGRES_USER: mageuser
+          POSTGRES_PASSWORD: password
+        volumes:
+          - postgres_data:/var/lib/postgresql/data
+      
+      mage:
+        image: mageai/mageai:latest
+        command: mage start demo_project
+        ports:
+          - "6789:6789"
+        volumes:
+          - .:/home/src
+        environment:
+          - MAGE_DATABASE_CONNECTION_URL=postgresql+psycopg2://mageuser:password@postgres:5432/mage
+        depends_on:
+          - postgres
+
+    volumes:
+      postgres_data:
+    ```
+  </Tab>
+
+  <Tab title="pip">
+    ### Install with pip
+
+    <Steps>
+      <Step title="Create a virtual environment (recommended)">
+        ```bash
+        python -m venv mage_env
+        source mage_env/bin/activate  # On Windows: mage_env\Scripts\activate
+        ```
+      </Step>
+
+      <Step title="Install Mage">
+        ```bash
+        pip install mage-ai
+        ```
+
+        This installs Mage version **0.9.79** and all required dependencies.
+      </Step>
+
+      <Step title="Verify installation">
+        ```bash
+        mage --help
+        ```
+
+        You should see the Mage CLI help output.
+      </Step>
+
+      <Step title="Initialize a project">
+        ```bash
+        mage init my_project
+        ```
+      </Step>
+
+      <Step title="Start Mage">
+        ```bash
+        mage start my_project
+        ```
+
+        Access the UI at `http://localhost:6789`
+      </Step>
+    </Steps>
+
+    #### Install with Extras
+
+    Mage supports optional integrations. Install them with:
+
+    ```bash
+    # For BigQuery support
+    pip install "mage-ai[bigquery]"
+
+    # For Snowflake support
+    pip install "mage-ai[snowflake]"
+
+    # For dbt support
+    pip install "mage-ai[dbt]"
+
+    # For Spark support
+    pip install "mage-ai[spark]"
+
+    # For all integrations
+    pip install "mage-ai[all]"
+    ```
+
+    <Warning>
+      The `[all]` extra installs many dependencies and may take several minutes.
+    </Warning>
+  </Tab>
+
+  <Tab title="conda">
+    ### Install with conda
+
+    <Steps>
+      <Step title="Create a conda environment">
+        ```bash
+        conda create -n mage python=3.10
+        conda activate mage
+        ```
+      </Step>
+
+      <Step title="Install Mage from conda-forge">
+        ```bash
+        conda install -c conda-forge mage-ai
+        ```
+      </Step>
+
+      <Step title="Verify installation">
+        ```bash
+        mage --help
+        ```
+      </Step>
+
+      <Step title="Initialize and start">
+        ```bash
+        mage init my_project
+        mage start my_project
+        ```
+      </Step>
+    </Steps>
+
+    <Note>
+      The conda package may not always have the latest version. Check the version with:
+      ```bash
+      mage --version
+      ```
+    </Note>
+  </Tab>
+</Tabs>
+
+## Platform-Specific Instructions
+
+<AccordionGroup>
+  <Accordion title="macOS">
+    ### macOS Installation
+
+    #### Using Homebrew (if available)
+    ```bash
+    # Install Python 3.9+ if not already installed
+    brew install python@3.10
+
+    # Install Mage
+    pip3 install mage-ai
+    ```
+
+    #### M1/M2 Macs
+    
+    Some dependencies may require Rosetta or specific builds:
+
+    ```bash
+    # Install Rosetta if needed
+    softwareupdate --install-rosetta
+
+    # Install with pip
+    pip install mage-ai
+    ```
+
+    If you encounter issues with native extensions, use Docker instead.
+  </Accordion>
+
+  <Accordion title="Windows">
+    ### Windows Installation
+
+    #### Using Windows Subsystem for Linux (WSL) - Recommended
+
+    1. Install WSL2:
+       ```powershell
+       wsl --install
+       ```
+
+    2. Open Ubuntu (or your preferred Linux distribution)
+
+    3. Follow the Linux pip installation instructions
+
+    #### Native Windows Installation
+
+    1. Install Python 3.9+ from [python.org](https://python.org)
+
+    2. Open PowerShell or Command Prompt:
+       ```powershell
+       pip install mage-ai
+       mage init my_project
+       mage start my_project
+       ```
+
+    <Warning>
+      Some features may have limited support on native Windows. WSL or Docker is recommended.
+    </Warning>
+  </Accordion>
+
+  <Accordion title="Linux">
+    ### Linux Installation
+
+    #### Ubuntu/Debian
+    ```bash
+    # Install Python 3.9+ if needed
+    sudo apt update
+    sudo apt install python3.10 python3.10-venv python3-pip
+
+    # Install Mage
+    pip3 install mage-ai
+    ```
+
+    #### CentOS/RHEL
+    ```bash
+    # Install Python 3.9+
+    sudo yum install python39 python39-pip
+
+    # Install Mage
+    pip3 install mage-ai
+    ```
+
+    #### Arch Linux
+    ```bash
+    # Install Python
+    sudo pacman -S python python-pip
+
+    # Install Mage
+    pip install mage-ai
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## CLI Reference
+
+After installation, the `mage` command is available with these subcommands:
+
+### `mage init`
+
+Initialize a new Mage project.
+
+```bash
+mage init <project_path>
+```
+
+**Options:**
+- `--project-type`: Type of project (`standalone`, `main`, `sub`). Default: `standalone`
+- `--project-uuid`: Custom project UUID
+
+**Example:**
+```bash
+mage init my_data_project
+```
+
+### `mage start`
+
+Start the Mage server and UI.
+
+```bash
+mage start [project_path]
+```
+
+**Options:**
+- `--host`: Host to run the server on (default: `localhost`)
+- `--port`: Port to run the server on (default: `6789`)
+- `--instance-type`: Instance type (default: `server_and_scheduler`)
+
+**Examples:**
+```bash
+# Start with default settings
+mage start my_project
+
+# Custom host and port
+mage start my_project --host 0.0.0.0 --port 8080
+
+# Run only scheduler (no UI)
+mage start my_project --instance-type scheduler
+```
+
+### `mage run`
+
+Run a pipeline from the command line.
+
+```bash
+mage run <project_path> <pipeline_uuid>
+```
+
+**Options:**
+- `--block-uuid`: Run a specific block only
+- `--test`: Run tests after execution
+- `--runtime-vars`: Pass runtime variables as JSON
+
+**Examples:**
+```bash
+# Run entire pipeline
+mage run my_project my_pipeline
+
+# Run specific block
+mage run my_project my_pipeline --block-uuid my_block
+
+# Run with variables
+mage run my_project my_pipeline --runtime-vars '{"env": "prod"}'
+
+# Run with tests
+mage run my_project my_pipeline --test
+```
+
+## Updating Mage
+
+<Tabs>
+  <Tab title="pip">
+    ```bash
+    pip install --upgrade mage-ai
+    ```
+  </Tab>
+
+  <Tab title="Docker">
+    ```bash
+    docker pull mageai/mageai:latest
+    ```
+  </Tab>
+
+  <Tab title="conda">
+    ```bash
+    conda update -c conda-forge mage-ai
+    ```
+  </Tab>
+</Tabs>
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="Port 6789 already in use">
+    If port 6789 is already in use, specify a different port:
+
+    ```bash
+    mage start my_project --port 8080
+    ```
+  </Accordion>
+
+  <Accordion title="Python version errors">
+    Ensure you have Python 3.9 or higher:
+
+    ```bash
+    python --version
+    ```
+
+    If you have multiple Python versions, use:
+
+    ```bash
+    python3.10 -m pip install mage-ai
+    ```
+  </Accordion>
+
+  <Accordion title="Permission errors during installation">
+    Install in user space:
+
+    ```bash
+    pip install --user mage-ai
+    ```
+
+    Or use a virtual environment (recommended).
+  </Accordion>
+
+  <Accordion title="Module import errors">
+    Ensure you're in the correct environment:
+
+    ```bash
+    which python
+    which pip
+    ```
+
+    Reinstall if necessary:
+
+    ```bash
+    pip uninstall mage-ai
+    pip install mage-ai
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Quick Start" icon="rocket" href="/quickstart">
+    Create your first pipeline in minutes
+  </Card>
+  
+  <Card title="Core Concepts" icon="book" href="/core-concepts">
+    Understand pipelines, blocks, and data flow
+  </Card>
+</CardGroup>

@@ -1,0 +1,582 @@
+---
+title: "Backfills"
+description: "Run pipelines for historical date ranges to reprocess or catch up on data"
+---
+
+Backfills allow you to execute a pipeline multiple times across a date range, creating separate runs for each interval. This is useful for reprocessing historical data, catching up on missed runs, or initial data loads.
+
+## What are Backfills?
+
+A backfill creates multiple pipeline runs, each with a different execution date within a specified time range. Each run receives variables indicating its position in the date range.
+
+<Note>
+Backfills are implemented in `mage_ai.orchestration.backfills.service` and create `PipelineRun` instances for each interval.
+</Note>
+
+## Creating a Backfill
+
+Backfills are typically created through the Mage UI, but can also be created programmatically:
+
+```python
+from mage_ai.orchestration.db.models.schedules import Backfill, PipelineSchedule
+from datetime import datetime
+import pytz
+
+# Create a backfill
+backfill = Backfill.create(
+    name='historical_load_2024_q1',
+    pipeline_uuid='data_pipeline',
+    start_datetime=datetime(2024, 1, 1, tzinfo=pytz.UTC),
+    end_datetime=datetime(2024, 3, 31, tzinfo=pytz.UTC),
+    interval_type=Backfill.IntervalType.DAY,
+    interval_units=1,
+    variables={
+        'env': 'production',
+        'backfill_mode': True,
+    },
+)
+```
+
+## Interval Types
+
+Backfills support multiple interval types:
+
+<Tabs>
+  <Tab title="Daily">
+    Create one run per day:
+    
+    ```python
+    backfill = Backfill.create(
+        name='daily_backfill',
+        pipeline_uuid='etl_pipeline',
+        start_datetime=datetime(2024, 1, 1, tzinfo=pytz.UTC),
+        end_datetime=datetime(2024, 1, 31, tzinfo=pytz.UTC),
+        interval_type=Backfill.IntervalType.DAY,
+        interval_units=1,  # Every 1 day
+    )
+    # Creates 31 runs (Jan 1 - Jan 31)
+    ```
+  </Tab>
+  
+  <Tab title="Hourly">
+    Create one run per hour:
+    
+    ```python
+    backfill = Backfill.create(
+        name='hourly_backfill',
+        pipeline_uuid='streaming_catch_up',
+        start_datetime=datetime(2024, 1, 1, 0, 0, tzinfo=pytz.UTC),
+        end_datetime=datetime(2024, 1, 1, 23, 0, tzinfo=pytz.UTC),
+        interval_type=Backfill.IntervalType.HOUR,
+        interval_units=1,  # Every 1 hour
+    )
+    # Creates 24 runs (00:00 - 23:00)
+    ```
+  </Tab>
+  
+  <Tab title="Weekly">
+    Create one run per week:
+    
+    ```python
+    backfill = Backfill.create(
+        name='weekly_backfill',
+        pipeline_uuid='weekly_report',
+        start_datetime=datetime(2024, 1, 1, tzinfo=pytz.UTC),
+        end_datetime=datetime(2024, 12, 31, tzinfo=pytz.UTC),
+        interval_type=Backfill.IntervalType.WEEK,
+        interval_units=1,  # Every 1 week
+    )
+    # Creates 52 runs (one per week)
+    ```
+  </Tab>
+  
+  <Tab title="Monthly">
+    Create one run per month:
+    
+    ```python
+    backfill = Backfill.create(
+        name='monthly_backfill',
+        pipeline_uuid='monthly_aggregation',
+        start_datetime=datetime(2023, 1, 1, tzinfo=pytz.UTC),
+        end_datetime=datetime(2023, 12, 1, tzinfo=pytz.UTC),
+        interval_type=Backfill.IntervalType.MONTH,
+        interval_units=1,  # Every 1 month
+    )
+    # Creates 12 runs (Jan - Dec 2023)
+    ```
+  </Tab>
+  
+  <Tab title="Custom Interval">
+    Create runs with custom intervals:
+    
+    ```python
+    backfill = Backfill.create(
+        name='custom_interval_backfill',
+        pipeline_uuid='custom_pipeline',
+        start_datetime=datetime(2024, 1, 1, tzinfo=pytz.UTC),
+        end_datetime=datetime(2024, 1, 31, tzinfo=pytz.UTC),
+        interval_type=Backfill.IntervalType.CUSTOM,
+        interval_units=3600,  # Every 3600 seconds (1 hour)
+    )
+    ```
+  </Tab>
+</Tabs>
+
+## Interval Type Options
+
+```python
+class IntervalType(StrEnum):
+    SECOND = 'second'
+    MINUTE = 'minute'
+    HOUR = 'hour'
+    DAY = 'day'
+    WEEK = 'week'
+    MONTH = 'month'
+    YEAR = 'year'
+    CUSTOM = 'custom'  # Specify units in seconds
+```
+
+## Starting a Backfill
+
+After creating a backfill, start it to generate pipeline runs:
+
+```python
+from mage_ai.orchestration.backfills.service import start_backfill
+
+# Start the backfill
+pipeline_runs = start_backfill(backfill)
+
+print(f'Created {len(pipeline_runs)} pipeline runs')
+for run in pipeline_runs:
+    print(f'Run {run.id}: {run.execution_date}')
+```
+
+### What Happens When Started
+
+1. **Generate execution dates** - Calculate all dates based on interval
+2. **Create pipeline schedule** - If needed, create a schedule for the backfill
+3. **Create pipeline runs** - Generate a `PipelineRun` for each date
+4. **Set variables** - Add date-specific variables to each run
+5. **Activate schedule** - Mark the schedule as active to begin execution
+
+## Variables in Backfill Runs
+
+Each pipeline run created by a backfill receives these variables:
+
+```python
+@data_loader
+def load_data(*args, **kwargs):
+    # Date string: YYYY-MM-DD
+    ds = kwargs['ds']
+    
+    # Hour string: HH
+    hr = kwargs['hr']
+    
+    # Full execution datetime (ISO format)
+    execution_date = kwargs['execution_date']
+    
+    # Interval boundaries
+    interval_start_datetime = kwargs['interval_start_datetime']
+    interval_end_datetime = kwargs['interval_end_datetime']
+    interval_seconds = kwargs['interval_seconds']
+    
+    # Previous interval start
+    interval_start_datetime_previous = kwargs['interval_start_datetime_previous']
+    
+    # Custom backfill variables
+    env = kwargs.get('env')
+    backfill_mode = kwargs.get('backfill_mode')
+    
+    print(f'Processing data for {ds}')
+    print(f'Interval: {interval_start_datetime} to {interval_end_datetime}')
+    
+    return data
+```
+
+### Variable Example
+
+For a daily backfill on 2024-01-15:
+
+```python
+{
+    'ds': '2024-01-15',
+    'hr': '00',
+    'execution_date': '2024-01-15T00:00:00+00:00',
+    'interval_start_datetime': '2024-01-15T00:00:00+00:00',
+    'interval_end_datetime': '2024-01-16T00:00:00+00:00',
+    'interval_seconds': 86400,
+    'interval_start_datetime_previous': '2024-01-14T00:00:00+00:00',
+}
+```
+
+## Previewing Backfill Dates
+
+Preview the dates that will be generated before starting:
+
+```python
+from mage_ai.orchestration.backfills.service import preview_run_dates
+
+backfill = Backfill(
+    start_datetime=datetime(2024, 1, 1, tzinfo=pytz.UTC),
+    end_datetime=datetime(2024, 1, 7, tzinfo=pytz.UTC),
+    interval_type=Backfill.IntervalType.DAY,
+    interval_units=1,
+)
+
+dates = preview_run_dates(backfill)
+
+print(f'Will create {len(dates)} runs:')
+for date_vars in dates:
+    print(f"  {date_vars['ds']} - {date_vars['interval_start_datetime']}")
+```
+
+Output:
+```
+Will create 7 runs:
+  2024-01-01 - 2024-01-01T00:00:00+00:00
+  2024-01-02 - 2024-01-02T00:00:00+00:00
+  2024-01-03 - 2024-01-03T00:00:00+00:00
+  2024-01-04 - 2024-01-04T00:00:00+00:00
+  2024-01-05 - 2024-01-05T00:00:00+00:00
+  2024-01-06 - 2024-01-06T00:00:00+00:00
+  2024-01-07 - 2024-01-07T00:00:00+00:00
+```
+
+## Backfill Status
+
+Backfills track their execution status:
+
+```python
+class Status(StrEnum):
+    INITIAL = 'initial'      # Created but not started
+    RUNNING = 'running'      # Actively executing
+    COMPLETED = 'completed'  # All runs completed successfully
+    FAILED = 'failed'        # One or more runs failed
+    CANCELLED = 'cancelled'  # Manually cancelled
+```
+
+### Checking Status
+
+```python
+backfill = Backfill.query.get(backfill_id)
+
+print(f'Status: {backfill.status}')
+print(f'Started: {backfill.started_at}')
+print(f'Completed: {backfill.completed_at}')
+
+# Get run status counts
+status_counts = backfill.pipeline_run_status_counts
+print(f"Completed: {status_counts.get('completed', 0)}")
+print(f"Failed: {status_counts.get('failed', 0)}")
+print(f"Running: {status_counts.get('running', 0)}")
+```
+
+## Cancelling a Backfill
+
+Cancel an in-progress backfill:
+
+```python
+from mage_ai.orchestration.backfills.service import cancel_backfill
+
+backfill = Backfill.query.get(backfill_id)
+cancel_backfill(backfill)
+
+print(f'Backfill cancelled. Status: {backfill.status}')
+```
+
+This will:
+1. Cancel all pending and running pipeline runs
+2. Set backfill status to `CANCELLED`
+3. Deactivate the associated pipeline schedule
+
+## Backfill Settings
+
+Apply settings to control backfill execution:
+
+```python
+backfill = Backfill.create(
+    name='production_backfill',
+    pipeline_uuid='etl_pipeline',
+    start_datetime=datetime(2024, 1, 1, tzinfo=pytz.UTC),
+    end_datetime=datetime(2024, 1, 31, tzinfo=pytz.UTC),
+    interval_type=Backfill.IntervalType.DAY,
+    interval_units=1,
+    settings={
+        'skip_if_previous_running': True,
+        'allow_blocks_to_fail': False,
+        'pipeline_run_limit': 5,  # Max 5 concurrent runs
+        'timeout': 3600,  # 1 hour timeout per run
+    },
+    variables={
+        'backfill_name': 'production_backfill',
+        'is_backfill': True,
+    },
+)
+```
+
+## Common Backfill Patterns
+
+### Daily Backfill for a Month
+
+```python
+from datetime import datetime
+import pytz
+
+backfill = Backfill.create(
+    name='january_2024_backfill',
+    pipeline_uuid='daily_etl',
+    start_datetime=datetime(2024, 1, 1, tzinfo=pytz.UTC),
+    end_datetime=datetime(2024, 1, 31, tzinfo=pytz.UTC),
+    interval_type=Backfill.IntervalType.DAY,
+    interval_units=1,
+)
+
+start_backfill(backfill)
+```
+
+### Hourly Backfill for a Day
+
+```python
+backfill = Backfill.create(
+    name='catch_up_2024_01_15',
+    pipeline_uuid='hourly_processing',
+    start_datetime=datetime(2024, 1, 15, 0, 0, tzinfo=pytz.UTC),
+    end_datetime=datetime(2024, 1, 15, 23, 0, tzinfo=pytz.UTC),
+    interval_type=Backfill.IntervalType.HOUR,
+    interval_units=1,
+)
+
+start_backfill(backfill)
+```
+
+### Monthly Backfill for a Year
+
+```python
+backfill = Backfill.create(
+    name='2023_monthly_aggregation',
+    pipeline_uuid='monthly_reports',
+    start_datetime=datetime(2023, 1, 1, tzinfo=pytz.UTC),
+    end_datetime=datetime(2023, 12, 1, tzinfo=pytz.UTC),
+    interval_type=Backfill.IntervalType.MONTH,
+    interval_units=1,
+)
+
+start_backfill(backfill)
+```
+
+### Every 6 Hours
+
+```python
+backfill = Backfill.create(
+    name='six_hour_intervals',
+    pipeline_uuid='periodic_sync',
+    start_datetime=datetime(2024, 1, 1, 0, 0, tzinfo=pytz.UTC),
+    end_datetime=datetime(2024, 1, 7, 23, 0, tzinfo=pytz.UTC),
+    interval_type=Backfill.IntervalType.HOUR,
+    interval_units=6,  # Every 6 hours
+)
+
+start_backfill(backfill)
+```
+
+## Using Backfill Variables in Pipelines
+
+Design pipelines to use backfill date variables:
+
+```python
+from datetime import datetime
+
+if 'data_loader' not in globals():
+    from mage_ai.data_preparation.decorators import data_loader
+
+@data_loader
+def load_data_for_date(*args, **kwargs):
+    """
+    Load data for the execution date.
+    """
+    # Get the date for this run
+    execution_date = kwargs['execution_date']
+    ds = kwargs['ds']  # YYYY-MM-DD format
+    
+    # Parse execution date
+    date = datetime.fromisoformat(execution_date)
+    
+    # Build date-specific file path
+    file_path = f's3://my-bucket/data/{date.year}/{date.month:02d}/{date.day:02d}/'
+    
+    print(f'Loading data from {file_path}')
+    
+    # Load data for this specific date
+    df = load_from_s3(file_path)
+    
+    return df
+```
+
+### Using Interval Boundaries
+
+```python
+@data_loader
+def load_with_boundaries(*args, **kwargs):
+    """
+    Load data using interval start and end times.
+    """
+    start = kwargs['interval_start_datetime']
+    end = kwargs['interval_end_datetime']
+    
+    query = f"""
+        SELECT *
+        FROM events
+        WHERE timestamp >= '{start}'
+        AND timestamp < '{end}'
+    """
+    
+    print(f'Loading data from {start} to {end}')
+    
+    return execute_query(query)
+```
+
+## Block-Specific Backfills
+
+Run backfills for a specific block instead of the entire pipeline:
+
+```python
+backfill = Backfill.create(
+    name='reprocess_transform_block',
+    pipeline_uuid='data_pipeline',
+    block_uuid='transform_data',  # Only run this block
+    start_datetime=datetime(2024, 1, 1, tzinfo=pytz.UTC),
+    end_datetime=datetime(2024, 1, 31, tzinfo=pytz.UTC),
+    interval_type=Backfill.IntervalType.DAY,
+    interval_units=1,
+)
+```
+
+<Warning>
+Block-specific backfills only execute the specified block and its downstream dependencies. Upstream blocks are not re-executed.
+</Warning>
+
+## Monitoring Backfills
+
+### Check Progress
+
+```python
+backfill = Backfill.query.get(backfill_id)
+
+total_runs = len(backfill.pipeline_runs)
+status_counts = backfill.pipeline_run_status_counts
+
+completed = status_counts.get('completed', 0)
+failed = status_counts.get('failed', 0)
+running = status_counts.get('running', 0)
+pending = status_counts.get('initial', 0)
+
+progress = (completed / total_runs) * 100 if total_runs > 0 else 0
+
+print(f'Backfill: {backfill.name}')
+print(f'Status: {backfill.status}')
+print(f'Progress: {progress:.1f}%')
+print(f'Completed: {completed}/{total_runs}')
+print(f'Failed: {failed}')
+print(f'Running: {running}')
+print(f'Pending: {pending}')
+```
+
+### List Failed Runs
+
+```python
+failed_runs = [
+    run for run in backfill.pipeline_runs
+    if run.status == PipelineRun.PipelineRunStatus.FAILED
+]
+
+if failed_runs:
+    print(f'Failed runs ({len(failed_runs)}):')
+    for run in failed_runs:
+        print(f'  Run {run.id}: {run.execution_date}')
+```
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Start with a small date range">
+    Test your backfill with a few days before running months or years of data. This helps catch issues early.
+    
+    ```python
+    # Test with 3 days first
+    test_backfill = Backfill.create(
+        name='test_backfill',
+        start_datetime=datetime(2024, 1, 1, tzinfo=pytz.UTC),
+        end_datetime=datetime(2024, 1, 3, tzinfo=pytz.UTC),
+        # ... other parameters
+    )
+    ```
+  </Accordion>
+  
+  <Accordion title="Limit concurrent runs">
+    Use `pipeline_run_limit` to prevent overwhelming your resources:
+    
+    ```python
+    settings={
+        'pipeline_run_limit': 5,  # Max 5 concurrent runs
+    }
+    ```
+  </Accordion>
+  
+  <Accordion title="Use appropriate intervals">
+    Choose intervals based on your data granularity:
+    - Daily data → Daily backfills
+    - Hourly data → Hourly backfills
+    - Monthly aggregations → Monthly backfills
+  </Accordion>
+  
+  <Accordion title="Add backfill detection logic">
+    Make your pipeline aware it's running as a backfill:
+    
+    ```python
+    @data_loader
+    def load_data(*args, **kwargs):
+        is_backfill = kwargs.get('is_backfill', False)
+        
+        if is_backfill:
+            # Use different logic for backfills
+            # e.g., different batch sizes, skip certain validations
+            batch_size = 10000
+        else:
+            batch_size = 1000
+    ```
+  </Accordion>
+  
+  <Accordion title="Monitor and retry failures">
+    Check backfill progress regularly and retry failed runs:
+    
+    ```python
+    # Get failed runs
+    failed_runs = [r for r in backfill.pipeline_runs if r.status == 'failed']
+    
+    # Retry failed runs
+    for run in failed_runs:
+        run.update(status=PipelineRun.PipelineRunStatus.INITIAL)
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Backfill vs Regular Schedule
+
+| Backfill | Regular Schedule |
+|----------|------------------|
+| Multiple runs for date range | Single run at scheduled time |
+| One-time operation | Recurring execution |
+| Creates all runs upfront | Creates runs as needed |
+| Uses execution_date variables | Uses current time |
+| Good for historical data | Good for ongoing processing |
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Triggers" icon="calendar" href="/orchestration/triggers">
+    Learn about schedule triggers for ongoing pipeline execution
+  </Card>
+  <Card title="Monitoring" icon="chart-line" href="/orchestration/monitoring">
+    Monitor backfill progress and troubleshoot failures
+  </Card>
+</CardGroup>

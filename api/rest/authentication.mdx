@@ -1,0 +1,250 @@
+---
+title: "Authentication"
+description: "Learn how to authenticate your requests to the Mage REST API"
+---
+
+## Overview
+
+Mage uses OAuth 2.0 for API authentication. All API requests must be authenticated using an API key and access token.
+
+## Authentication Methods
+
+Mage supports multiple authentication methods:
+
+- **OAuth 2.0** (Default)
+- **LDAP** (Enterprise)
+- **OAuth Providers** (Google, GitHub, etc.)
+
+## API Key and Token
+
+To authenticate your API requests, you need:
+
+1. **API Key**: Identifies your OAuth application
+2. **Access Token**: Authenticates the user making the request
+
+### Obtaining an Access Token
+
+Create a session to obtain an access token:
+
+<CodeGroup>
+
+```bash Email/Password
+curl -X POST http://localhost:6789/api/sessions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "session": {
+      "email": "admin@example.com",
+      "password": "your_password"
+    },
+    "api_key": "your_api_key"
+  }'
+```
+
+```bash Username/Password
+curl -X POST http://localhost:6789/api/sessions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "session": {
+      "username": "admin",
+      "password": "your_password"
+    },
+    "api_key": "your_api_key"
+  }'
+```
+
+```bash OAuth Provider
+curl -X POST http://localhost:6789/api/sessions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "session": {
+      "token": "oauth_access_token",
+      "provider": "google"
+    },
+    "api_key": "your_api_key"
+  }'
+```
+
+</CodeGroup>
+
+### Response
+
+```json
+{
+  "session": {
+    "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+    "expires": "2024-03-05T10:30:00Z",
+    "user": {
+      "id": 1,
+      "username": "admin",
+      "email": "admin@example.com",
+      "roles": ["Admin"]
+    }
+  }
+}
+```
+
+## Making Authenticated Requests
+
+Include both the API key and access token in your requests:
+
+### Header-based Authentication
+
+<CodeGroup>
+
+```bash API-Key Header
+curl -X GET http://localhost:6789/api/pipelines \
+  -H "API-Key: your_api_key" \
+  -H "OAUTH-TOKEN: your_access_token"
+```
+
+```bash Bearer Token
+curl -X GET http://localhost:6789/api/pipelines \
+  -H "API-Key: your_api_key" \
+  -H "Authorization: Bearer your_access_token"
+```
+
+</CodeGroup>
+
+### Query Parameter Authentication
+
+```bash
+curl -X GET "http://localhost:6789/api/pipelines?api_key=your_api_key&token=your_access_token"
+```
+
+### Cookie-based Authentication
+
+When authenticating through the web UI, the access token is stored in a cookie named `oauth_token`.
+
+## API Key Configuration
+
+The default OAuth application client ID is configured via the `OAUTH2_APPLICATION_CLIENT_ID` environment variable.
+
+```bash
+export OAUTH2_APPLICATION_CLIENT_ID="your_client_id"
+```
+
+## Authentication Headers
+
+<ParamField header="API-Key" type="string" required>
+  Your OAuth application client ID
+</ParamField>
+
+<ParamField header="OAUTH-TOKEN" type="string" required>
+  Your access token obtained from the sessions endpoint
+</ParamField>
+
+<ParamField header="Authorization" type="string">
+  Alternative to OAUTH-TOKEN. Format: `Bearer {access_token}`
+</ParamField>
+
+## Error Responses
+
+### Invalid API Key
+
+```json
+{
+  "error": {
+    "code": 401,
+    "message": "Invalid API key"
+  }
+}
+```
+
+### Invalid or Expired Token
+
+```json
+{
+  "error": {
+    "code": 401,
+    "message": "Invalid OAuth token"
+  }
+}
+```
+
+```json
+{
+  "error": {
+    "code": 401,
+    "message": "Expired OAuth token"
+  }
+}
+```
+
+## Token Management
+
+### Refresh Token
+
+Tokens have an expiration time. When a token expires, create a new session to obtain a fresh token.
+
+### Logout
+
+To invalidate a token:
+
+```bash
+curl -X PUT http://localhost:6789/api/sessions/current \
+  -H "API-Key: your_api_key" \
+  -H "OAUTH-TOKEN: your_access_token" \
+  -H "Content-Type: application/json" \
+  -d '{}'
+```
+
+## User Authentication Settings
+
+### Disable Authentication (Development)
+
+```bash
+export REQUIRE_USER_AUTHENTICATION=0
+```
+
+<Warning>
+  Disabling authentication should only be done in secure development environments.
+</Warning>
+
+### Enable Permissions
+
+```bash
+export REQUIRE_USER_PERMISSIONS=1
+```
+
+## LDAP Authentication
+
+For LDAP authentication, configure the following:
+
+```bash
+export AUTHENTICATION_MODE=ldap
+export LDAP_ADMIN_USERNAME=admin
+export LDAP_DEFAULT_ACCESS=Viewer
+```
+
+LDAP users authenticate with their username and password, and roles are automatically assigned based on LDAP group membership.
+
+## OAuth Provider Configuration
+
+Supported OAuth providers:
+
+- Google
+- GitHub  
+- Okta
+- Azure Active Directory
+- And more
+
+Configure provider-specific settings in your Mage configuration.
+
+## Best Practices
+
+1. **Keep API keys secure**: Never commit API keys to version control
+2. **Rotate tokens regularly**: Implement token refresh logic in your applications
+3. **Use HTTPS in production**: Always use encrypted connections
+4. **Scope access appropriately**: Assign minimal required permissions to users
+5. **Monitor authentication logs**: Track failed authentication attempts
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Pipeline Endpoints" icon="diagram-project" href="/api/rest/pipelines">
+    Manage pipelines via the API
+  </Card>
+  <Card title="Block Endpoints" icon="cube" href="/api/rest/blocks">
+    Create and manage blocks
+  </Card>
+</CardGroup>

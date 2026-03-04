@@ -1,0 +1,453 @@
+---
+title: 'AI-Powered Features'
+description: 'Leverage AI to generate pipelines, blocks, and documentation automatically'
+icon: 'sparkles'
+---
+
+## Overview
+
+Mage includes AI-powered features that help you generate code, create pipelines, and write documentation using Large Language Models (LLMs). These features support both OpenAI and Hugging Face models.
+
+## Installation
+
+Install Mage with AI capabilities:
+
+```bash
+pip install mage-ai[ai]
+```
+
+This installs the following dependencies (setup.py:43-48):
+
+- astor >= 0.8.1
+- langchain == 0.2.5
+- langchain_community == 0.2.5
+- openai == 1.82.0
+
+## Configuration
+
+### OpenAI Setup
+
+Enable OpenAI and configure your API key:
+
+<Steps>
+  <Step title="Enable OpenAI">
+    Set the environment variable:
+    ```bash
+    export ENABLE_OPEN_AI=1
+    ```
+  </Step>
+  
+  <Step title="Configure API key">
+    Set your OpenAI API key in one of three ways:
+    
+    <Tabs>
+      <Tab title="Environment Variable">
+        ```bash
+        export OPENAI_API_KEY=sk-...
+        ```
+      </Tab>
+      
+      <Tab title="Repository Config">
+        Add to your repository's `metadata.yaml`:
+        ```yaml
+        openai_api_key: sk-...
+        ```
+      </Tab>
+      
+      <Tab title="AI Config">
+        Configure in AI settings:
+        ```yaml
+        ai_config:
+          mode: open_ai
+          open_ai_config:
+            openai_api_key: sk-...
+        ```
+      </Tab>
+    </Tabs>
+  </Step>
+</Steps>
+
+Mage uses GPT-4 by default (openai_client.py:80):
+
+```python
+GPT_MODEL = "gpt-4o"
+```
+
+### Hugging Face Setup
+
+Enable Hugging Face models:
+
+```bash
+export ENABLE_HUGGING_FACE=1
+```
+
+Configure in your AI settings:
+
+```yaml
+ai_config:
+  mode: hugging_face
+  hugging_face_config:
+    model_name: your-model-name
+```
+
+## AI Client Architecture
+
+Mage's AI system uses a client-based architecture (llm_pipeline_wizard.py:193-202):
+
+```python
+class LLMPipelineWizard:
+    def __init__(self):
+        ai_config = AIConfig.load(config=get_repo_config().ai_config)
+        if ENABLE_OPEN_AI and ai_config.mode == AIMode.OPEN_AI:
+            self.client = OpenAIClient(ai_config.open_ai_config)
+        elif ENABLE_HUGGING_FACE and ai_config.mode == AIMode.HUGGING_FACE:
+            self.client = HuggingFaceClient(ai_config.hugging_face_config)
+```
+
+## Features
+
+### 1. Block Generation
+
+Generate blocks from natural language descriptions.
+
+<CodeGroup>
+```python Generate Block
+from mage_ai.ai.llm_pipeline_wizard import LLMPipelineWizard
+
+wizard = LLMPipelineWizard()
+
+# Generate a block from description
+block = await wizard.async_generate_block_with_description(
+    block_description="Load customer data from PostgreSQL and filter records from last 30 days",
+    upstream_blocks=['raw_data']
+)
+
+print(block['block_type'])      # data_loader
+print(block['language'])        # python
+print(block['content'])         # Generated code
+```
+
+```python Response Structure
+{
+    'block_type': 'data_loader',
+    'configuration': {
+        'data_source': 'postgresql',
+        'action_type': 'filter'
+    },
+    'content': '# Generated Python code...',
+    'language': 'python',
+    'upstream_blocks': ['raw_data']
+}
+```
+</CodeGroup>
+
+The AI classifies the description and determines (openai_client.py:23-79):
+
+- **Block Type**: `data_loader`, `transformer`, or `data_exporter`
+- **Language**: `python`, `sql`, `r`, `yaml`, or `markdown`
+- **Pipeline Type**: `python`, `pyspark`, `streaming`, etc.
+- **Action Type**: For transformers (filter, group, aggregate, etc.)
+- **Data Source**: For loaders/exporters (postgres, bigquery, s3, etc.)
+
+### 2. Pipeline Generation
+
+Generate entire pipelines from descriptions.
+
+```python
+wizard = LLMPipelineWizard()
+
+# Generate complete pipeline
+pipeline = await wizard.async_generate_pipeline_from_description(
+    "Load data from MySQL and Postgres, filter rows with price > 100, and save to BigQuery"
+)
+
+# Returns dictionary of blocks
+# {
+#   '1': { block_type: 'data_loader', ... },  # MySQL loader
+#   '2': { block_type: 'data_loader', ... },  # Postgres loader
+#   '3': { block_type: 'transformer', ... },  # Filter transformer
+#   '4': { block_type: 'data_exporter', ... } # BigQuery exporter
+# }
+```
+
+The AI automatically:
+- Splits the description into logical blocks (llm_pipeline_wizard.py:103-126)
+- Determines upstream dependencies
+- Generates code for each block
+- Configures proper block connections
+
+### 3. Code Generation
+
+Generate custom code within blocks.
+
+<Tabs>
+  <Tab title="Python">
+    ```python
+    # Generate Python transformation logic
+    result = await wizard.generate_code_async(
+        block_description="Calculate moving average over 7 days",
+        code_language=BlockLanguage.PYTHON,
+        block_type=BlockType.TRANSFORMER
+    )
+    
+    print(result['code'])     # Generated code
+    print(result['content'])  # Full block template with code
+    ```
+  </Tab>
+  
+  <Tab title="SQL">
+    ```python
+    # Generate SQL query
+    result = await wizard.generate_code_async(
+        block_description="Join orders with customers on customer_id",
+        code_language=BlockLanguage.SQL,
+    )
+    
+    print(result['code'])  # Generated SQL
+    ```
+  </Tab>
+</Tabs>
+
+### 4. Documentation Generation
+
+Generate documentation for blocks and pipelines.
+
+<CodeGroup>
+```python Block Documentation
+wizard = LLMPipelineWizard()
+
+# Generate documentation for a block
+doc = await wizard.async_generate_doc_for_block(
+    pipeline_uuid='my_pipeline',
+    block_uuid='transform_data',
+)
+
+print(doc)  # Markdown documentation
+```
+
+```python Pipeline Documentation
+# Generate documentation for entire pipeline
+result = await wizard.async_generate_doc_for_pipeline(
+    pipeline_uuid='my_pipeline',
+    print_block_doc=True,  # Also print individual block docs
+)
+
+print(result['pipeline_doc'])  # Overall pipeline documentation
+print(result['block_docs'])    # List of block documentations
+```
+</CodeGroup>
+
+Documentation generation (llm_pipeline_wizard.py:427-485):
+- Analyzes block code and purpose
+- Focuses on business logic, not boilerplate
+- Follows Google Docstring format for function comments
+- Generates block-level and pipeline-level documentation
+
+### 5. Function Comments
+
+Add AI-generated comments to existing code.
+
+```python
+wizard = LLMPipelineWizard()
+
+# Add comments to functions in a block
+commented_code = await wizard.async_generate_comment_for_block(
+    block_content=your_block_code
+)
+
+print(commented_code)  # Code with added docstrings
+```
+
+The AI (llm_pipeline_wizard.py:394-425):
+- Parses the Python AST
+- Identifies all functions
+- Generates Google Docstring format comments
+- Inserts comments while preserving code structure
+
+## Prompt Engineering
+
+Mage uses carefully crafted prompts for different tasks (llm_pipeline_wizard.py:51-135):
+
+### Block Documentation Prompt
+
+```python
+PROMPT_FOR_BLOCK = """
+The {file_type} delimited by triple backticks is used to {purpose}.
+Write a documentation based on the {file_type}. {add_on_prompt}
+Ignore the imported libraries and the @test decorator.
+```{block_content}```"""
+```
+
+### Code Generation Prompt
+
+```python
+PROMPT_FOR_CUSTOMIZED_CODE_IN_PYTHON = """
+The content within the triple backticks is a code description.
+
+Your task is to answer the following two questions.
+
+1. Is there any filter logic mentioned in the description to remove rows or columns of the data?
+If yes, write ONLY the filter logic as a if condition without "if" at beginning.
+Return your response as one field in JSON format with the key "action_code".
+
+2. Does the description mention any columns or rows to aggregrate on or group by?
+If yes, list ONLY those columns in an array and return it as a field in JSON response
+with the key "arguments".
+
+<code description>: ```{code_description}```
+
+Provide your response in JSON format.
+"""
+```
+
+## Advanced Usage
+
+### Custom Inference
+
+Use the AI client directly for custom prompts (openai_client.py:107-150):
+
+```python
+from mage_ai.ai.openai_client import OpenAIClient
+from mage_ai.orchestration.ai.config import OpenAIConfig
+
+client = OpenAIClient(OpenAIConfig(openai_api_key='sk-...'))
+
+# Custom inference
+result = await client.inference_with_prompt(
+    variable_values={
+        'input_data': 'your data',
+        'requirement': 'your requirement'
+    },
+    prompt_template="Given {input_data}, generate code to {requirement}",
+    is_json_response=True  # Expect JSON response
+)
+```
+
+### Function Calling
+
+Mage uses OpenAI function calling for structured outputs (openai_client.py:92-105):
+
+```python
+response = client.openai_client.chat.completions.create(
+    model=GPT_MODEL,
+    messages=messages,
+    tools=tools,
+    tool_choice={
+        "type": "function", 
+        "function": {"name": CLASSIFICATION_FUNCTION_NAME}
+    },
+)
+```
+
+### Retry Logic
+
+The AI client includes automatic retry logic (openai_client.py:196-203):
+
+```python
+max_retries = 2
+attempt = 0
+response = self.__chat_completion_request(messages)
+while attempt <= max_retries and isinstance(response, Exception):
+    response = self.__chat_completion_request(messages)
+    attempt += 1
+```
+
+## Best Practices
+
+<Steps>
+  <Step title="Write clear descriptions">
+    Provide detailed, specific descriptions for better AI-generated code.
+    
+    <CodeGroup>
+    ```text Good
+    Load customer orders from PostgreSQL where order_date is in the last 30 days and status is 'completed', then calculate total revenue by product category
+    ```
+    
+    ```text Poor
+    Get orders and calculate revenue
+    ```
+    </CodeGroup>
+  </Step>
+  
+  <Step title="Review generated code">
+    Always review and test AI-generated code before using in production.
+  </Step>
+  
+  <Step title="Secure API keys">
+    Use environment variables or secret management for API keys, never commit them to version control.
+  </Step>
+  
+  <Step title="Monitor API usage">
+    Track OpenAI API usage to manage costs, especially for large pipelines.
+  </Step>
+</Steps>
+
+## Limitations
+
+<Warning>
+  - AI-generated code may require manual adjustments
+  - Complex logic might not be accurately captured
+  - API costs scale with usage
+  - Responses are non-deterministic
+</Warning>
+
+## Example: Complete Workflow
+
+```python
+import asyncio
+from mage_ai.ai.llm_pipeline_wizard import LLMPipelineWizard
+
+async def create_ai_pipeline():
+    wizard = LLMPipelineWizard()
+    
+    # 1. Generate pipeline structure
+    blocks = await wizard.async_generate_pipeline_from_description(
+        "Extract sales data from Snowflake, aggregate by region, and load to BigQuery"
+    )
+    
+    # 2. Generate documentation
+    for block_id, block_config in blocks.items():
+        # Generate code comments
+        if block_config['language'] == 'python':
+            commented = await wizard.async_generate_comment_for_block(
+                block_config['content']
+            )
+            block_config['content'] = commented
+    
+    # 3. Create pipeline with blocks
+    # ... pipeline creation logic ...
+    
+    return blocks
+
+# Run async workflow
+blocks = asyncio.run(create_ai_pipeline())
+```
+
+## Troubleshooting
+
+### API Key Errors
+
+Ensure your OpenAI API key is correctly set and has sufficient credits.
+
+### Model Not Found
+
+Verify you have access to GPT-4. If not, modify the model in your configuration.
+
+### Rate Limiting
+
+Implement exponential backoff or reduce concurrent requests if hitting rate limits.
+
+### Parsing Errors
+
+The AI client includes JSON parsing fixes (openai_client.py:140-147):
+
+```python
+if not resp.startswith('{') and not resp.endswith('}'):
+    resp = f'{{{resp.strip()}}}'
+```
+
+## Additional Resources
+
+- [OpenAI API Documentation](https://platform.openai.com/docs)
+- [LangChain Documentation](https://python.langchain.com/)
+- [Prompt Engineering Guide](https://www.promptingguide.ai/)

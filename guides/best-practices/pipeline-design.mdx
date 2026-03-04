@@ -1,0 +1,467 @@
+---
+title: "Pipeline Design Best Practices"
+description: "Best practices for designing robust and maintainable Mage pipelines"
+---
+
+## Overview
+
+Well-designed pipelines are the foundation of reliable data workflows. This guide covers architectural patterns and design principles based on Mage's core implementation.
+
+## Pipeline Structure
+
+### Block Organization
+
+Mage pipelines are composed of blocks that form a directed acyclic graph (DAG). Each block type serves a specific purpose:
+
+<Note>
+Mage automatically validates your pipeline for cycles during creation and updates. A cycle detection error will prevent saving invalid pipeline configurations.
+</Note>
+
+```python
+# Block types in Mage (from mage_ai/data_preparation/models/constants.py)
+- DATA_LOADER: Extract data from sources
+- TRANSFORMER: Transform and clean data  
+- DATA_EXPORTER: Load data to destinations
+- SENSOR: Wait for conditions
+- CONDITIONAL: Control flow logic
+- CALLBACK: Post-execution actions
+- DBT: dbt model execution
+- CUSTOM: Custom logic blocks
+```
+
+### Naming Conventions
+
+Block names are automatically cleaned using `clean_name()` which:
+- Converts to lowercase with underscores
+- Removes special characters
+- Ensures filesystem compatibility
+
+<Tip>
+Use descriptive, action-oriented names like `load_customer_data`, `transform_user_metrics`, or `export_to_warehouse` rather than generic names like `block1` or `transformer`.
+</Tip>
+
+## Dependency Management
+
+### Upstream and Downstream Blocks
+
+Mage executes blocks based on their dependency graph:
+
+```python
+# Example: Pipeline execution flow
+# mage_ai/data_preparation/models/block/__init__.py
+
+# Blocks execute only when all upstream dependencies complete
+def all_upstream_blocks_completed(completed_block_uuids):
+    return all(uuid in completed_block_uuids 
+               for uuid in upstream_block_uuids)
+```
+
+<Warning>
+Ensure your dependency graph is minimal. Unnecessary dependencies can create bottlenecks and reduce parallelization opportunities.
+</Warning>
+
+### Dynamic Blocks
+
+Use dynamic blocks when you need to process variable numbers of items:
+
+```python
+@data_loader
+def load_data(*args, **kwargs):
+    # Returns list of items to process dynamically
+    return [
+        {'customer_id': 1, 'data': {...}},
+        {'customer_id': 2, 'data': {...}},
+        # More items...
+    ]
+
+@transformer  
+def transform(data, *args, **kwargs):
+    # This block runs once per item from upstream
+    customer_id = data['customer_id']
+    return process_customer(data)
+```
+
+<Note>
+Dynamic blocks are identified by `is_dynamic_block()` and create child blocks automatically. Set `dynamic_block_index` and `dynamic_block_uuid` for proper tracking.
+</Note>
+
+## Variable Management
+
+### Block Outputs
+
+Mage's `VariableManager` handles data persistence between blocks:
+
+```python
+# Outputs are automatically stored by variable type
+# mage_ai/data_preparation/variable_manager.py
+
+# Supported variable types:
+- DATAFRAME (Pandas)
+- POLARS_DATAFRAME  
+- SERIES_PANDAS
+- SERIES_POLARS
+- ITERABLE (for lists)
+- GEO_DATAFRAME
+- SPARK_DATAFRAME
+```
+
+<Tip>
+Mage automatically infers variable types. DataFrames are stored efficiently with metadata for quick previews. Large iterables are split into chunks automatically when using `MEMORY_MANAGER_V2`.
+</Tip>
+
+### Partition Strategy
+
+Use partitions to organize outputs by time or other dimensions:
+
+```python
+@data_loader
+def load_data(**kwargs):
+    execution_date = kwargs['execution_date']
+    partition = execution_date.strftime('%Y%m%dT%H%M%S')
+    
+    # Data stored in: variables/pipelines/{pipeline}/variables/{partition}/{block_uuid}/
+    return data
+```
+
+<Note>
+The `variables_retention_period` in `metadata.yaml` automatically cleans old partitions. Set this to manage storage growth.
+</Note>
+
+## Configuration Best Practices
+
+### Pipeline Settings
+
+Configure pipelines in `metadata.yaml`:
+
+```yaml
+# Essential pipeline configuration
+name: customer_analytics_pipeline
+type: python
+uuid: customer_analytics_pipeline
+
+# Performance settings
+cache_block_output_in_memory: false  # Only enable for small datasets
+run_pipeline_in_one_process: false   # Use separate processes for isolation
+
+# Concurrency control
+concurrency_config:
+  block_run_limit: 10  # Max concurrent block runs
+
+# Execution configuration  
+executor_type: local_python
+executor_config:
+  # Executor-specific settings
+```
+
+<Warning>
+Setting `cache_block_output_in_memory: true` can cause memory issues with large datasets. Only use for small pipelines with tight latency requirements.
+</Warning>
+
+### Block Configuration
+
+Each block can have custom configuration:
+
+```python
+from mage_ai.data_preparation.decorators import data_loader
+
+@data_loader
+def load_data(**kwargs):
+    # Access block configuration
+    config = kwargs.get('configuration', {})
+    
+    # Use configuration for flexibility
+    batch_size = config.get('batch_size', 1000)
+    endpoint = config.get('api_endpoint')
+    
+    return fetch_data(endpoint, batch_size)
+```
+
+## Execution Patterns
+
+### Parallel vs Sequential
+
+Mage supports both execution modes:
+
+```python
+# Parallel execution (default)
+# mage_ai/data_preparation/models/block/__init__.py
+async def run_blocks(root_blocks, parallel=True):
+    # Blocks execute concurrently when dependencies allow
+    tasks = {}
+    for block in blocks:
+        if all_upstream_completed(block):
+            tasks[block.uuid] = asyncio.create_task(
+                block.execute()
+            )
+    await asyncio.gather(*tasks.values())
+```
+
+<Tip>
+Use parallel execution (default) for I/O-bound operations. Consider sequential execution for resource-intensive transformations that could overwhelm the system.
+</Tip>
+
+### Execution Context
+
+Understand the execution context passed to blocks:
+
+```python
+@transformer
+def transform(data, *args, **kwargs):
+    # Available in kwargs:
+    # - execution_date: Trigger execution time
+    # - execution_partition: Partition identifier  
+    # - logger: Block-specific logger
+    # - pipeline_uuid: Current pipeline identifier
+    # - block_uuid: Current block identifier
+    
+    logger = kwargs.get('logger')
+    logger.info(f"Processing {len(data)} records")
+    
+    return transformed_data
+```
+
+## Pipeline Types
+
+### Standard Python Pipelines
+
+Most common pipeline type for batch processing:
+
+```python
+# Pipeline type: python
+# Executes blocks in topological order
+# Stores outputs between blocks
+```
+
+### Integration Pipelines
+
+For data synchronization between systems:
+
+```python
+# Pipeline type: integration  
+# Uses data integration catalog
+# Supports source/destination configs
+# Handles schema evolution
+```
+
+<Note>
+Integration pipelines use a separate `catalog.json` file for stream configurations. This is managed automatically when you configure sources and destinations.
+</Note>
+
+### Streaming Pipelines
+
+For real-time data processing:
+
+```python
+# Pipeline type: streaming
+# Continuous execution
+# Uses streaming sources/sinks  
+# executor_count controls parallelism
+```
+
+## Repository Structure
+
+### Recommended Layout
+
+```
+project_root/
+├── metadata.yaml          # Project configuration
+├── pipelines/             # Pipeline definitions
+│   ├── pipeline_name/
+│   │   ├── metadata.yaml  # Pipeline config
+│   │   └── __init__.py
+├── data_loaders/          # Data loader blocks
+├── transformers/          # Transformer blocks  
+├── data_exporters/        # Data exporter blocks
+├── custom/                # Custom blocks
+├── sensors/               # Sensor blocks
+└── variables/             # Stored outputs
+    └── pipelines/
+        └── pipeline_name/
+            └── variables/
+```
+
+<Tip>
+Keep block files organized by type. Mage automatically creates `__init__.py` files in block directories for proper Python module resolution.
+</Tip>
+
+## Reusable Blocks
+
+### Block Replication
+
+Create variations of blocks without duplicating code:
+
+```python
+# In pipeline metadata.yaml
+blocks:
+  - uuid: transform_data
+    type: transformer
+    # ... config ...
+    
+  - uuid: transform_data_variant  
+    type: transformer
+    replicated_block: transform_data
+    configuration:
+      # Override specific settings
+      custom_param: different_value
+```
+
+<Note>
+Replicated blocks reference the original block's code but can have different configurations. The `replicated_block` property creates a `uuid:replicated_block` identifier for tracking.
+</Note>
+
+### Extension Blocks
+
+Group related blocks together:
+
+```yaml
+extensions:
+  data_quality:
+    blocks:
+      - uuid: validate_schema
+        type: custom
+      - uuid: check_nulls  
+        type: custom
+```
+
+## Template Variables
+
+Use Jinja2 templates in pipeline configuration:
+
+```yaml
+executor_config:
+  # Template variables are rendered at runtime
+  env: "{{ env_var('ENVIRONMENT') }}"
+  cluster_name: "{{ env_var('CLUSTER_NAME', 'default') }}"
+```
+
+<Tip>
+Template variables from `get_template_vars()` include environment variables and runtime context. This enables environment-specific configurations without code changes.
+</Tip>
+
+## Performance Considerations
+
+### Memory Management
+
+```python
+# Memory tracking is automatic
+# mage_ai/system/memory/wrappers.py
+
+@execute_with_memory_tracking
+def transform(data):
+    # Resource usage automatically tracked
+    # Available in block.resource_usage
+    return transformed_data
+```
+
+<Warning>
+Large DataFrames consume significant memory. Consider:
+1. Processing data in chunks using batch settings
+2. Using Polars instead of Pandas for better memory efficiency  
+3. Enabling `read_batch_settings` and `write_batch_settings`
+4. Clearing intermediate variables within blocks
+</Warning>
+
+### Caching Strategy
+
+Mage includes several caching layers:
+
+```python
+# Pipeline cache (mage_ai/cache/pipeline.py)
+# Caches pipeline metadata for fast access
+
+# Block cache (mage_ai/cache/block.py)  
+# Tracks block-to-pipeline relationships
+
+# Variable aggregate cache
+# Caches variable metadata and statistics
+```
+
+<Tip>
+Caches are automatically updated when pipelines or blocks change. Use `BlockCache` and `PipelineCache` for programmatic access when building custom tools.
+</Tip>
+
+## Validation and Testing
+
+### Automatic Validation
+
+Mage validates pipelines automatically:
+
+```python
+# Cycle detection
+pipeline.validate('A cycle was detected in this pipeline')
+
+# Block type validation  
+if block_type not in [b.value for b in BlockType]:
+    raise Exception(f'Invalid block type ({block_type})')
+```
+
+### Test Blocks
+
+Add tests to blocks using the `@test` decorator:
+
+```python
+from mage_ai.data_preparation.decorators import test
+
+@test
+def test_output(output, *args):
+    assert output is not None, 'Output is undefined'
+    assert len(output) > 0, 'Output is empty'
+```
+
+<Note>
+Tests run automatically after block execution when `run_tests=True`. Use `run_tests(update_tests=False)` to execute tests without updating stored results.
+</Note>
+
+## Common Patterns
+
+### Conditional Execution
+
+Use conditional blocks for dynamic workflows:
+
+```python
+@condition
+def check_data_quality(data, *args, **kwargs):
+    # Return True to continue, False to skip downstream  
+    return data is not None and len(data) > 0
+```
+
+### Callbacks
+
+Execute actions after block completion:
+
+```python
+@callback
+def on_success(*args, **kwargs):
+    # Runs when parent block succeeds
+    send_notification("Pipeline step completed")
+
+@callback  
+def on_failure(*args, **kwargs):
+    # Runs when parent block fails
+    alert_team("Pipeline step failed")
+```
+
+## Summary
+
+<Accordion title="Quick Reference">
+
+**Pipeline Design Checklist:**
+- ✅ Use descriptive, action-oriented block names
+- ✅ Minimize dependencies for better parallelization
+- ✅ Configure appropriate partition strategy
+- ✅ Set `variables_retention_period` to manage storage
+- ✅ Use dynamic blocks for variable-length processing
+- ✅ Leverage block replication for variations
+- ✅ Add tests to validate outputs
+- ✅ Consider memory implications of large datasets
+- ✅ Use template variables for environment-specific config
+- ✅ Choose appropriate executor type for workload
+
+**Avoid:**
+- ❌ Circular dependencies (automatically prevented)
+- ❌ Caching large datasets in memory
+- ❌ Generic block names like "block1"
+- ❌ Unnecessary upstream dependencies
+- ❌ Running all blocks in one process for large pipelines
+
+</Accordion>

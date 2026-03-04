@@ -1,0 +1,564 @@
+---
+title: '@data_exporter'
+description: 'Decorator for data export blocks in Mage'
+---
+
+## Overview
+
+The `@data_exporter` decorator identifies a function as a data export block in Mage. Data exporters are terminal nodes in a pipeline, responsible for writing data to destinations like databases, files, APIs, or cloud storage.
+
+## Basic Usage
+
+```python
+from mage_ai.data_preparation.decorators import data_exporter
+
+@data_exporter
+def export_data(data, *args, **kwargs):
+    """
+    Export data to your destination.
+    """
+    # Your export logic
+```
+
+## Function Signature
+
+The decorated function should follow this signature:
+
+```python
+@data_exporter
+def export_data(
+    data,         # Output from first upstream block
+    *args,        # Outputs from additional upstream blocks
+    **kwargs      # Global variables and configuration
+) -> None:        # Typically returns None (or status info)
+    pass
+```
+
+## Parameters
+
+<ParamField path="data" type="Any" required>
+  Output from the first upstream block. Typically a DataFrame, but can be any Python object.
+</ParamField>
+
+<ParamField path="*args" type="tuple">
+  Outputs from additional upstream blocks (if multiple upstream dependencies exist).
+</ParamField>
+
+<ParamField path="**kwargs" type="dict">
+  Contains:
+  - Global variables defined in the pipeline
+  - `execution_date`: Current execution timestamp
+  - `execution_partition`: Partition identifier
+  - Custom variables passed during execution
+</ParamField>
+
+<ResponseField name="return" type="None | dict">
+  Typically returns None. Can optionally return metadata about the export operation.
+</ResponseField>
+
+## Examples
+
+### Export to CSV
+
+```python
+import pandas as pd
+from mage_ai.data_preparation.decorators import data_exporter
+
+@data_exporter
+def export_to_csv(df: pd.DataFrame, *args, **kwargs) -> None:
+    """
+    Export dataframe to CSV file.
+    """
+    output_path = 'output/customers.csv'
+    
+    df.to_csv(
+        output_path,
+        index=False,
+        encoding='utf-8'
+    )
+    
+    print(f"Exported {len(df)} rows to {output_path}")
+```
+
+### Export to PostgreSQL
+
+```python
+import pandas as pd
+from mage_ai.data_preparation.decorators import data_exporter
+from mage_ai.data_preparation.repo_manager import get_repo_path
+from mage_ai.io.config import ConfigFileLoader
+from mage_ai.io.postgres import Postgres
+import os
+
+@data_exporter
+def export_to_postgres(df: pd.DataFrame, *args, **kwargs) -> None:
+    """
+    Export data to PostgreSQL database.
+    """
+    schema_name = 'public'
+    table_name = 'customers'
+    config_path = os.path.join(get_repo_path(), 'io_config.yaml')
+    config_profile = 'default'
+
+    with Postgres.with_config(
+        ConfigFileLoader(config_path, config_profile)
+    ) as loader:
+        loader.export(
+            df,
+            schema_name,
+            table_name,
+            index=False,
+            if_exists='replace',  # or 'append', 'fail'
+        )
+    
+    print(f"Exported {len(df)} rows to {schema_name}.{table_name}")
+```
+
+### Export to S3
+
+```python
+import pandas as pd
+from mage_ai.data_preparation.decorators import data_exporter
+from mage_ai.io.s3 import S3
+from mage_ai.io.config import ConfigFileLoader
+import os
+
+@data_exporter
+def export_to_s3(df: pd.DataFrame, *args, **kwargs) -> None:
+    """
+    Export data to AWS S3 bucket.
+    """
+    bucket_name = 'my-data-bucket'
+    object_key = 'customers/data.parquet'
+    
+    config_path = os.path.join(get_repo_path(), 'io_config.yaml')
+    config = ConfigFileLoader(config_path, 'default')
+    
+    S3.with_config(config).export(
+        df,
+        bucket_name,
+        object_key,
+    )
+    
+    print(f"Exported {len(df)} rows to s3://{bucket_name}/{object_key}")
+```
+
+### Export to Google BigQuery
+
+```python
+import pandas as pd
+from mage_ai.data_preparation.decorators import data_exporter
+from mage_ai.io.bigquery import BigQuery
+from mage_ai.io.config import ConfigFileLoader
+import os
+
+@data_exporter
+def export_to_bigquery(df: pd.DataFrame, *args, **kwargs) -> None:
+    """
+    Export data to Google BigQuery.
+    """
+    table_id = 'my_project.my_dataset.customers'
+    config_path = os.path.join(get_repo_path(), 'io_config.yaml')
+    config = ConfigFileLoader(config_path, 'default')
+    
+    BigQuery.with_config(config).export(
+        df,
+        table_id,
+        if_exists='replace',  # or 'append'
+    )
+    
+    print(f"Exported {len(df)} rows to {table_id}")
+```
+
+### Export to Snowflake
+
+```python
+import pandas as pd
+from mage_ai.data_preparation.decorators import data_exporter
+from mage_ai.io.snowflake import Snowflake
+from mage_ai.io.config import ConfigFileLoader
+import os
+
+@data_exporter
+def export_to_snowflake(df: pd.DataFrame, *args, **kwargs) -> None:
+    """
+    Export data to Snowflake.
+    """
+    table_name = 'CUSTOMERS'
+    database = 'ANALYTICS'
+    schema = 'PUBLIC'
+    
+    config_path = os.path.join(get_repo_path(), 'io_config.yaml')
+    config = ConfigFileLoader(config_path, 'default')
+    
+    with Snowflake.with_config(config) as loader:
+        loader.export(
+            df,
+            table_name,
+            database,
+            schema,
+            if_exists='replace',
+        )
+    
+    print(f"Exported {len(df)} rows to {database}.{schema}.{table_name}")
+```
+
+### Export to API
+
+```python
+import pandas as pd
+import requests
+from mage_ai.data_preparation.decorators import data_exporter
+import json
+
+@data_exporter
+def export_to_api(df: pd.DataFrame, *args, **kwargs) -> None:
+    """
+    Export data to REST API.
+    """
+    api_url = 'https://api.example.com/customers'
+    api_key = kwargs.get('api_key')
+    
+    headers = {
+        'Authorization': f'Bearer {api_key}',
+        'Content-Type': 'application/json'
+    }
+    
+    # Convert dataframe to list of dicts
+    records = df.to_dict('records')
+    
+    # Send in batches
+    batch_size = 100
+    for i in range(0, len(records), batch_size):
+        batch = records[i:i + batch_size]
+        
+        response = requests.post(
+            api_url,
+            headers=headers,
+            json={'data': batch}
+        )
+        response.raise_for_status()
+        
+        print(f"Exported batch {i // batch_size + 1}: {len(batch)} records")
+    
+    print(f"Total exported: {len(records)} records")
+```
+
+### Partitioned Export
+
+```python
+import pandas as pd
+from mage_ai.data_preparation.decorators import data_exporter
+from datetime import datetime
+
+@data_exporter
+def export_partitioned(df: pd.DataFrame, *args, **kwargs) -> None:
+    """
+    Export data partitioned by date.
+    """
+    execution_date = kwargs.get('execution_date', datetime.now())
+    partition = execution_date.strftime('%Y-%m-%d')
+    
+    # Export to partitioned path
+    output_path = f's3://bucket/data/date={partition}/data.parquet'
+    
+    df.to_parquet(
+        output_path,
+        index=False,
+        compression='snappy'
+    )
+    
+    print(f"Exported {len(df)} rows to partition {partition}")
+```
+
+### Export Multiple Tables
+
+```python
+import pandas as pd
+from mage_ai.data_preparation.decorators import data_exporter
+from mage_ai.io.postgres import Postgres
+from mage_ai.io.config import ConfigFileLoader
+import os
+
+@data_exporter
+def export_multiple_tables(
+    customers_df: pd.DataFrame,
+    orders_df: pd.DataFrame,
+    *args,
+    **kwargs
+) -> None:
+    """
+    Export multiple dataframes to different tables.
+    """
+    config_path = os.path.join(get_repo_path(), 'io_config.yaml')
+    config = ConfigFileLoader(config_path, 'default')
+    
+    with Postgres.with_config(config) as loader:
+        # Export customers
+        loader.export(
+            customers_df,
+            'public',
+            'customers',
+            index=False,
+            if_exists='replace'
+        )
+        print(f"Exported {len(customers_df)} customers")
+        
+        # Export orders
+        loader.export(
+            orders_df,
+            'public',
+            'orders',
+            index=False,
+            if_exists='replace'
+        )
+        print(f"Exported {len(orders_df)} orders")
+```
+
+### Incremental Export (Append)
+
+```python
+import pandas as pd
+from mage_ai.data_preparation.decorators import data_exporter
+from mage_ai.io.postgres import Postgres
+from mage_ai.io.config import ConfigFileLoader
+import os
+
+@data_exporter
+def export_incremental(df: pd.DataFrame, *args, **kwargs) -> None:
+    """
+    Append new data to existing table.
+    """
+    config_path = os.path.join(get_repo_path(), 'io_config.yaml')
+    config = ConfigFileLoader(config_path, 'default')
+    
+    # Add timestamp
+    df['inserted_at'] = pd.Timestamp.now()
+    
+    with Postgres.with_config(config) as loader:
+        loader.export(
+            df,
+            'public',
+            'customers_history',
+            index=False,
+            if_exists='append',  # Append to existing table
+        )
+    
+    print(f"Appended {len(df)} new rows")
+```
+
+### Export with Data Validation
+
+```python
+import pandas as pd
+from mage_ai.data_preparation.decorators import data_exporter
+import logging
+
+logger = logging.getLogger(__name__)
+
+@data_exporter
+def export_with_validation(df: pd.DataFrame, *args, **kwargs) -> None:
+    """
+    Validate data before export.
+    """
+    # Validate data
+    if df.empty:
+        logger.warning("Dataframe is empty, skipping export")
+        return
+    
+    # Check for required columns
+    required_columns = ['customer_id', 'email']
+    missing = set(required_columns) - set(df.columns)
+    if missing:
+        raise ValueError(f"Missing required columns: {missing}")
+    
+    # Check for nulls in critical columns
+    null_counts = df[required_columns].isnull().sum()
+    if null_counts.any():
+        logger.warning(f"Found null values: {null_counts[null_counts > 0].to_dict()}")
+    
+    # Check for duplicates
+    duplicates = df.duplicated(subset=['customer_id']).sum()
+    if duplicates > 0:
+        raise ValueError(f"Found {duplicates} duplicate customer_ids")
+    
+    # Export
+    output_path = 'output/validated_customers.csv'
+    df.to_csv(output_path, index=False)
+    
+    logger.info(f"Successfully exported {len(df)} validated records")
+```
+
+### Export with Retry Logic
+
+```python
+import pandas as pd
+from mage_ai.data_preparation.decorators import data_exporter
+import time
+import logging
+
+logger = logging.getLogger(__name__)
+
+@data_exporter
+def export_with_retry(df: pd.DataFrame, *args, **kwargs) -> None:
+    """
+    Export with retry logic for transient failures.
+    """
+    max_retries = 3
+    retry_delay = 5  # seconds
+    
+    for attempt in range(max_retries):
+        try:
+            # Attempt export
+            df.to_csv('output/data.csv', index=False)
+            logger.info(f"Export succeeded on attempt {attempt + 1}")
+            return
+            
+        except Exception as e:
+            if attempt < max_retries - 1:
+                logger.warning(
+                    f"Export failed (attempt {attempt + 1}/{max_retries}): {e}. "
+                    f"Retrying in {retry_delay} seconds..."
+                )
+                time.sleep(retry_delay)
+            else:
+                logger.error(f"Export failed after {max_retries} attempts")
+                raise
+```
+
+### Export with Compression
+
+```python
+import pandas as pd
+from mage_ai.data_preparation.decorators import data_exporter
+
+@data_exporter
+def export_compressed(df: pd.DataFrame, *args, **kwargs) -> None:
+    """
+    Export data with compression.
+    """
+    # Export as Parquet with snappy compression
+    df.to_parquet(
+        'output/data.parquet',
+        engine='pyarrow',
+        compression='snappy',
+        index=False
+    )
+    
+    # Or export as compressed CSV
+    df.to_csv(
+        'output/data.csv.gz',
+        index=False,
+        compression='gzip'
+    )
+    
+    print(f"Exported {len(df)} rows (compressed)")
+```
+
+### Export Summary Statistics
+
+```python
+import pandas as pd
+from mage_ai.data_preparation.decorators import data_exporter
+import json
+
+@data_exporter
+def export_with_summary(df: pd.DataFrame, *args, **kwargs) -> dict:
+    """
+    Export data and return summary statistics.
+    """
+    # Export main data
+    output_path = 'output/customers.csv'
+    df.to_csv(output_path, index=False)
+    
+    # Generate summary
+    summary = {
+        'rows_exported': len(df),
+        'columns': list(df.columns),
+        'file_path': output_path,
+        'export_timestamp': pd.Timestamp.now().isoformat(),
+        'data_types': df.dtypes.astype(str).to_dict(),
+        'memory_usage': df.memory_usage(deep=True).sum(),
+    }
+    
+    # Save summary
+    with open('output/export_summary.json', 'w') as f:
+        json.dump(summary, f, indent=2)
+    
+    print(f"Exported {summary['rows_exported']} rows")
+    return summary
+```
+
+## Best Practices
+
+### 1. Use Configuration Files
+
+```python
+from mage_ai.io.config import ConfigFileLoader
+
+@data_exporter
+def export_data(df, *args, **kwargs):
+    config = ConfigFileLoader('io_config.yaml', 'default')
+    # Use config for database connections
+```
+
+### 2. Handle Errors Gracefully
+
+```python
+import logging
+logger = logging.getLogger(__name__)
+
+@data_exporter
+def export_data(df, *args, **kwargs):
+    try:
+        df.to_csv('output.csv', index=False)
+        logger.info("Export successful")
+    except Exception as e:
+        logger.error(f"Export failed: {e}")
+        raise
+```
+
+### 3. Validate Before Export
+
+```python
+@data_exporter
+def export_data(df, *args, **kwargs):
+    assert not df.empty, "Cannot export empty dataframe"
+    assert 'id' in df.columns, "Missing required 'id' column"
+    # Export
+```
+
+### 4. Log Export Statistics
+
+```python
+@data_exporter
+def export_data(df, *args, **kwargs):
+    print(f"Exporting {len(df)} rows, {len(df.columns)} columns")
+    df.to_csv('output.csv', index=False)
+    print("Export complete")
+```
+
+## Testing Data Exporters
+
+```python
+from mage_ai.data_preparation.decorators import test
+import os
+
+@data_exporter
+def export_data(df, *args, **kwargs):
+    output_path = 'output/data.csv'
+    df.to_csv(output_path, index=False)
+
+@test
+def test_export(*args):
+    """
+    Verify that export was successful.
+    """
+    output_path = 'output/data.csv'
+    assert os.path.exists(output_path), 'Export file not found'
+    
+    # Verify content
+    df = pd.read_csv(output_path)
+    assert len(df) > 0, 'Exported file is empty'
+    assert 'customer_id' in df.columns, 'Missing expected columns'
+```

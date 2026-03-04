@@ -1,122 +1,206 @@
 {
   "$schema": "https://mintlify.com/docs.json",
-  "theme": "mint",
-  "name": "Mint Starter Kit",
+  "name": "Mage",
+  "theme": "maple",
   "colors": {
-    "primary": "#16A34A",
-    "light": "#07C983",
-    "dark": "#15803D"
+    "primary": "#04ea79",
+    "light": "#048b48",
+    "dark": "#040604"
   },
-  "favicon": "/favicon.svg",
+  "favicon": "https://media.brand.dev/3ee42efe-c253-478a-8f14-a0ac242b9817.jpg",
+  "logo": {
+    "light": "https://media.brand.dev/3625cb4c-8b87-40c4-8ca5-2610a335706b.svg",
+    "dark": "https://media.brand.dev/3625cb4c-8b87-40c4-8ca5-2610a335706b.svg"
+  },
+  "navbar": {
+    "primary": {
+      "type": "github",
+      "href": "https://github.com/mage-ai/mage-ai"
+    }
+  },
+  "footer": {
+    "socials": {
+      "github": "https://github.com/mage-ai/mage-ai"
+    }
+  },
   "navigation": {
     "tabs": [
       {
-        "tab": "Guides",
+        "tab": "Documentation",
         "groups": [
           {
-            "group": "Getting started",
+            "group": "Getting Started",
             "pages": [
-              "index",
+              "introduction",
               "quickstart",
-              "development"
+              "installation",
+              "core-concepts"
             ]
           },
           {
-            "group": "Customization",
+            "group": "Pipelines",
             "pages": [
-              "essentials/settings",
-              "essentials/navigation"
+              "pipelines/overview",
+              "pipelines/creating-pipelines",
+              "pipelines/blocks",
+              "pipelines/execution",
+              "pipelines/scheduling",
+              "pipelines/dynamic-blocks"
             ]
           },
           {
-            "group": "Writing content",
+            "group": "Data Integrations",
             "pages": [
-              "essentials/markdown",
-              "essentials/code",
-              "essentials/images",
-              "essentials/reusable-snippets"
+              "integrations/overview",
+              "integrations/sources",
+              "integrations/destinations",
+              "integrations/custom-integrations"
             ]
           },
           {
-            "group": "AI tools",
+            "group": "Development",
             "pages": [
-              "ai-tools/cursor",
-              "ai-tools/claude-code",
-              "ai-tools/windsurf"
+              "development/notebook-ui",
+              "development/writing-code",
+              "development/testing",
+              "development/debugging",
+              "development/variables"
+            ]
+          },
+          {
+            "group": "Orchestration",
+            "pages": [
+              "orchestration/overview",
+              "orchestration/triggers",
+              "orchestration/sensors",
+              "orchestration/backfills",
+              "orchestration/monitoring"
+            ]
+          },
+          {
+            "group": "Deployment",
+            "pages": [
+              "deployment/overview",
+              "deployment/docker",
+              "deployment/kubernetes",
+              "deployment/cloud-providers",
+              "deployment/configuration"
+            ]
+          },
+          {
+            "group": "Advanced Features",
+            "pages": [
+              "advanced/dbt-integration",
+              "advanced/streaming",
+              "advanced/spark-integration",
+              "advanced/ai-features",
+              "advanced/custom-executors"
             ]
           }
         ]
       },
       {
-        "tab": "API reference",
+        "tab": "API Reference",
         "groups": [
           {
-            "group": "API documentation",
+            "group": "CLI Commands",
             "pages": [
-              "api-reference/introduction"
+              "api/cli/init",
+              "api/cli/start",
+              "api/cli/run",
+              "api/cli/clean"
             ]
           },
           {
-            "group": "Endpoint examples",
+            "group": "Python API",
             "pages": [
-              "api-reference/endpoint/get",
-              "api-reference/endpoint/create",
-              "api-reference/endpoint/delete",
-              "api-reference/endpoint/webhook"
+              "api/python/pipeline",
+              "api/python/block",
+              "api/python/data-loader",
+              "api/python/data-transformer",
+              "api/python/data-exporter",
+              "api/python/variable-manager"
+            ]
+          },
+          {
+            "group": "REST API",
+            "pages": [
+              "api/rest/authentication",
+              "api/rest/pipelines",
+              "api/rest/blocks",
+              "api/rest/pipeline-runs",
+              "api/rest/triggers"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Integrations",
+        "groups": [
+          {
+            "group": "Data Sources",
+            "pages": [
+              "integrations/sources/overview",
+              "integrations/sources/databases",
+              "integrations/sources/apis",
+              "integrations/sources/cloud-storage",
+              "integrations/sources/streaming"
+            ]
+          },
+          {
+            "group": "Data Destinations",
+            "pages": [
+              "integrations/destinations/overview",
+              "integrations/destinations/databases",
+              "integrations/destinations/data-warehouses",
+              "integrations/destinations/cloud-storage",
+              "integrations/destinations/streaming"
+            ]
+          },
+          {
+            "group": "Infrastructure",
+            "pages": [
+              "integrations/compute/overview",
+              "integrations/compute/spark",
+              "integrations/compute/dask",
+              "integrations/compute/kubernetes"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Guides",
+        "groups": [
+          {
+            "group": "Tutorials",
+            "pages": [
+              "guides/first-pipeline",
+              "guides/etl-workflow",
+              "guides/streaming-pipeline",
+              "guides/dbt-pipeline",
+              "guides/ml-pipeline"
+            ]
+          },
+          {
+            "group": "Best Practices",
+            "pages": [
+              "guides/best-practices/pipeline-design",
+              "guides/best-practices/error-handling",
+              "guides/best-practices/performance",
+              "guides/best-practices/testing",
+              "guides/best-practices/security"
+            ]
+          },
+          {
+            "group": "Migration",
+            "pages": [
+              "guides/migration/from-airflow",
+              "guides/migration/from-dagster",
+              "guides/migration/from-prefect"
             ]
           }
         ]
       }
-    ],
-    "global": {
-      "anchors": [
-        {
-          "anchor": "Documentation",
-          "href": "https://mintlify.com/docs",
-          "icon": "book-open-cover"
-        },
-        {
-          "anchor": "Blog",
-          "href": "https://mintlify.com/blog",
-          "icon": "newspaper"
-        }
-      ]
-    }
-  },
-  "logo": {
-    "light": "/logo/light.svg",
-    "dark": "/logo/dark.svg"
-  },
-  "navbar": {
-    "links": [
-      {
-        "label": "Support",
-        "href": "mailto:hi@mintlify.com"
-      }
-    ],
-    "primary": {
-      "type": "button",
-      "label": "Dashboard",
-      "href": "https://dashboard.mintlify.com"
-    }
-  },
-  "contextual": {
-    "options": [
-     "copy",
-     "view",
-     "chatgpt",
-     "claude",
-     "perplexity",
-     "mcp",
-     "cursor",
-     "vscode"
-   ]
-  },
-  "footer": {
-    "socials": {
-      "x": "https://x.com/mintlify",
-      "github": "https://github.com/mintlify",
-      "linkedin": "https://linkedin.com/company/mintlify"
-    }
+    ]
   }
 }

@@ -1,0 +1,562 @@
+---
+title: "Sensors"
+description: "Use sensors to wait for external conditions before executing pipelines"
+---
+
+Sensors are special blocks that pause pipeline execution until a specified condition is met. They're useful for waiting on external resources, file arrivals, or dependent pipeline completions.
+
+## What are Sensors?
+
+A sensor is a block type that continuously checks a condition and waits until it returns `True`. The sensor polls the condition every minute (by default) until satisfied.
+
+<Note>
+Sensors are implemented as a special `BlockType.SENSOR` in Mage. They differ from regular blocks in their execution pattern.
+</Note>
+
+## Creating a Sensor Block
+
+Sensors use the `@sensor` decorator:
+
+```python
+if 'sensor' not in globals():
+    from mage_ai.data_preparation.decorators import sensor
+
+@sensor
+def check_condition(*args, **kwargs) -> bool:
+    """
+    Return True when the condition is met, False otherwise.
+    The sensor will sleep for 1 minute between checks.
+    """
+    # Your condition logic here
+    return condition_met
+```
+
+### How Sensors Work
+
+When a sensor executes:
+
+1. The sensor function is called
+2. If it returns `True`, execution continues to downstream blocks
+3. If it returns `False`, the sensor sleeps for 60 seconds
+4. Steps 1-3 repeat until the condition is met
+
+<Warning>
+Sensors will run indefinitely until their condition is satisfied. Make sure your sensor logic eventually returns `True` or implement a timeout mechanism.
+</Warning>
+
+## Sensor Templates
+
+Mage provides templates for common sensor patterns:
+
+<Tabs>
+  <Tab title="Pipeline/Block Status">
+    Wait for another pipeline or block to complete:
+    
+    ```python
+    from mage_ai.orchestration.run_status_checker import check_status
+
+    if 'sensor' not in globals():
+        from mage_ai.data_preparation.decorators import sensor
+
+    @sensor
+    def check_condition(*args, **kwargs) -> bool:
+        """
+        Wait for a pipeline or block to complete.
+        """
+        return check_status(
+            'upstream_pipeline',
+            kwargs['execution_date'],
+            block_uuid='specific_block',  # optional
+            hours=24,  # look back window
+        )
+    ```
+  </Tab>
+  
+  <Tab title="S3 File Exists">
+    Wait for a file to appear in S3:
+    
+    ```python
+    from mage_ai.settings.repo import get_repo_path
+    from mage_ai.io.config import ConfigFileLoader
+    from mage_ai.io.s3 import S3
+    from os import path
+
+    if 'sensor' not in globals():
+        from mage_ai.data_preparation.decorators import sensor
+
+    @sensor
+    def check_condition(*args, **kwargs) -> bool:
+        """
+        Check if a file exists in S3.
+        """
+        config_path = path.join(get_repo_path(), 'io_config.yaml')
+        config_profile = 'default'
+
+        bucket_name = 'my-data-bucket'
+        s3_path = 'data/input/file.csv'
+
+        config_file_loader = ConfigFileLoader(config_path, config_profile)
+        return S3.with_config(config_file_loader).exists(
+            bucket_name, 
+            s3_path
+        )
+    ```
+  </Tab>
+  
+  <Tab title="Google Cloud Storage">
+    Wait for a file in GCS:
+    
+    ```python
+    from mage_ai.settings.repo import get_repo_path
+    from mage_ai.io.config import ConfigFileLoader
+    from mage_ai.io.google_cloud_storage import GoogleCloudStorage
+    from os import path
+
+    if 'sensor' not in globals():
+        from mage_ai.data_preparation.decorators import sensor
+
+    @sensor
+    def check_condition(*args, **kwargs) -> bool:
+        """
+        Check if a file exists in GCS.
+        """
+        config_path = path.join(get_repo_path(), 'io_config.yaml')
+        config_profile = 'default'
+
+        bucket_name = 'my-gcs-bucket'
+        object_key = 'data/input/file.parquet'
+
+        return GoogleCloudStorage.with_config(
+            ConfigFileLoader(config_path, config_profile)
+        ).exists(bucket_name, object_key)
+    ```
+  </Tab>
+  
+  <Tab title="Database Query">
+    Wait for data in a database:
+    
+    ```python
+    from mage_ai.settings.repo import get_repo_path
+    from mage_ai.io.config import ConfigFileLoader
+    from mage_ai.io.postgres import Postgres
+    from os import path
+
+    if 'sensor' not in globals():
+        from mage_ai.data_preparation.decorators import sensor
+
+    @sensor
+    def query_postgres_and_check_condition(*args, **kwargs) -> bool:
+        """
+        Check if data exists in Postgres.
+        """
+        config_path = path.join(get_repo_path(), 'io_config.yaml')
+        config_profile = 'default'
+
+        query = '''
+            SELECT COUNT(*) as count
+            FROM orders
+            WHERE created_at >= CURRENT_DATE
+        '''
+
+        with Postgres.with_config(
+            ConfigFileLoader(config_path, config_profile)
+        ) as loader:
+            df = loader.load(query)
+            
+            # Check if we have new orders today
+            if df.empty or df.iloc[0]['count'] == 0:
+                return False
+            
+            return True
+    ```
+  </Tab>
+  
+  <Tab title="BigQuery">
+    Wait for data in BigQuery:
+    
+    ```python
+    from mage_ai.settings.repo import get_repo_path
+    from mage_ai.io.bigquery import BigQuery
+    from mage_ai.io.config import ConfigFileLoader
+    from os import path
+
+    if 'sensor' not in globals():
+        from mage_ai.data_preparation.decorators import sensor
+
+    @sensor
+    def query_bigquery_and_check_condition(*args, **kwargs) -> bool:
+        """
+        Check if data exists in BigQuery.
+        """
+        config_path = path.join(get_repo_path(), 'io_config.yaml')
+        config_profile = 'default'
+
+        query = '''
+            SELECT COUNT(*) as count
+            FROM `project.dataset.table`
+            WHERE DATE(timestamp) = CURRENT_DATE()
+        '''
+
+        loader = BigQuery.with_config(
+            ConfigFileLoader(config_path, config_profile)
+        )
+        df = loader.load(query)
+
+        # Check if data exists
+        if df.empty:
+            return False
+
+        return df.iloc[0]['count'] > 0
+    ```
+  </Tab>
+</Tabs>
+
+## Sensor Patterns
+
+### Time-Based Sensor
+
+Wait until a specific time:
+
+```python
+from datetime import datetime, time
+import pytz
+
+if 'sensor' not in globals():
+    from mage_ai.data_preparation.decorators import sensor
+
+@sensor
+def wait_until_time(*args, **kwargs) -> bool:
+    """
+    Wait until 9 AM EST.
+    """
+    est = pytz.timezone('US/Eastern')
+    now = datetime.now(est)
+    target_time = time(9, 0)  # 9:00 AM
+    
+    return now.time() >= target_time
+```
+
+### Multiple Conditions Sensor
+
+Wait for multiple conditions:
+
+```python
+from mage_ai.orchestration.run_status_checker import check_status
+from mage_ai.io.s3 import S3
+from mage_ai.io.config import ConfigFileLoader
+
+if 'sensor' not in globals():
+    from mage_ai.data_preparation.decorators import sensor
+
+@sensor
+def check_multiple_conditions(*args, **kwargs) -> bool:
+    """
+    Wait for both a pipeline to complete AND a file to exist.
+    """
+    # Check if upstream pipeline completed
+    pipeline_done = check_status(
+        'data_ingestion_pipeline',
+        kwargs['execution_date'],
+        hours=24,
+    )
+    
+    if not pipeline_done:
+        return False
+    
+    # Check if validation file exists
+    config_loader = ConfigFileLoader('io_config.yaml', 'default')
+    file_exists = S3.with_config(config_loader).exists(
+        'my-bucket',
+        'validation/ready.flag'
+    )
+    
+    return file_exists
+```
+
+### Dynamic File Pattern Sensor
+
+Wait for files matching a pattern:
+
+```python
+from mage_ai.io.s3 import S3
+from mage_ai.io.config import ConfigFileLoader
+from os import path
+
+if 'sensor' not in globals():
+    from mage_ai.data_preparation.decorators import sensor
+
+@sensor
+def wait_for_daily_files(*args, **kwargs) -> bool:
+    """
+    Wait for all expected daily files to arrive.
+    """
+    execution_date = kwargs['execution_date']
+    date_str = execution_date.strftime('%Y-%m-%d')
+    
+    expected_files = [
+        f'data/users/{date_str}.parquet',
+        f'data/orders/{date_str}.parquet',
+        f'data/products/{date_str}.parquet',
+    ]
+    
+    config_loader = ConfigFileLoader('io_config.yaml', 'default')
+    s3 = S3.with_config(config_loader)
+    
+    bucket = 'my-data-lake'
+    
+    # Check all files exist
+    for file_path in expected_files:
+        if not s3.exists(bucket, file_path):
+            print(f'Still waiting for {file_path}')
+            return False
+    
+    print('All files present!')
+    return True
+```
+
+### API Status Sensor
+
+Wait for an external API to report completion:
+
+```python
+import requests
+
+if 'sensor' not in globals():
+    from mage_ai.data_preparation.decorators import sensor
+
+@sensor
+def check_api_status(*args, **kwargs) -> bool:
+    """
+    Poll an external API until job is complete.
+    """
+    job_id = kwargs.get('job_id')
+    api_url = f'https://api.example.com/jobs/{job_id}/status'
+    
+    try:
+        response = requests.get(api_url)
+        response.raise_for_status()
+        
+        status = response.json()['status']
+        
+        if status == 'completed':
+            print(f'Job {job_id} completed')
+            return True
+        elif status == 'failed':
+            raise Exception(f'Job {job_id} failed')
+        else:
+            print(f'Job {job_id} status: {status}')
+            return False
+            
+    except Exception as e:
+        print(f'Error checking status: {e}')
+        return False
+```
+
+## Using Variables in Sensors
+
+Sensors have access to runtime variables:
+
+```python
+if 'sensor' not in globals():
+    from mage_ai.data_preparation.decorators import sensor
+
+@sensor
+def check_with_variables(*args, **kwargs) -> bool:
+    """
+    Use runtime variables in sensor logic.
+    """
+    # Execution date
+    execution_date = kwargs['execution_date']
+    ds = kwargs.get('ds')  # Date string YYYY-MM-DD
+    
+    # Custom variables
+    env = kwargs.get('env', 'development')
+    source_bucket = kwargs.get('source_bucket', 'default-bucket')
+    
+    print(f'Checking for {ds} files in {source_bucket}')
+    
+    # Your sensor logic using variables
+    # ...
+    
+    return condition_met
+```
+
+## Sensor Placement in Pipelines
+
+Sensors are typically placed:
+
+1. **At the start** - Wait for input data before beginning
+2. **Between stages** - Wait for external processing between pipeline stages
+3. **Before exports** - Wait for target system availability
+
+```
+┌──────────┐
+│  Sensor  │  Wait for input files
+└────┬─────┘
+     │
+┌────▼──────┐
+│  Loader   │  Load data
+└────┬──────┘
+     │
+┌────▼────────┐
+│ Transformer │  Transform data
+└────┬────────┘
+     │
+┌────▼─────┐
+│  Sensor  │  Wait for warehouse availability
+└────┬─────┘
+     │
+┌────▼─────────┐
+│   Exporter   │  Export to warehouse
+└──────────────┘
+```
+
+## Skipping Sensors
+
+You can skip sensors during pipeline execution:
+
+### Via CLI
+
+```bash
+mage run [project_path] [pipeline_uuid] --skip-sensors
+```
+
+### Via API
+
+```python
+from mage_ai.data_preparation.models.pipeline import Pipeline
+from mage_ai.data_preparation.executors.executor_factory import ExecutorFactory
+
+pipeline = Pipeline.get('my_pipeline')
+
+executor = ExecutorFactory.get_pipeline_executor(
+    pipeline,
+    executor_type='local_python',
+)
+
+executor.execute(
+    run_sensors=False,  # Skip all sensors
+    global_vars={'date': '2024-01-01'},
+)
+```
+
+<Tip>
+Skip sensors during development and testing to speed up iteration.
+</Tip>
+
+## Error Handling
+
+Handle errors gracefully in sensors:
+
+```python
+import traceback
+
+if 'sensor' not in globals():
+    from mage_ai.data_preparation.decorators import sensor
+
+@sensor
+def check_with_error_handling(*args, **kwargs) -> bool:
+    """
+    Sensor with robust error handling.
+    """
+    max_failures = 5
+    failure_count = kwargs.get('__sensor_failure_count', 0)
+    
+    try:
+        # Your sensor logic
+        condition = check_external_resource()
+        
+        if condition:
+            return True
+        
+        print(f'Condition not met, will retry...')
+        return False
+        
+    except Exception as e:
+        failure_count += 1
+        print(f'Sensor check failed ({failure_count}/{max_failures}): {e}')
+        traceback.print_exc()
+        
+        # Store failure count (note: this won't persist between checks)
+        # Consider using external state storage for production
+        
+        if failure_count >= max_failures:
+            raise Exception(f'Sensor failed {max_failures} times, giving up')
+        
+        return False
+```
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Add logging to sensors">
+    Print clear messages about what the sensor is waiting for and why checks fail. This helps with debugging.
+    
+    ```python
+    @sensor
+    def check_condition(*args, **kwargs) -> bool:
+        print(f"Checking for file: {file_path}")
+        if not file_exists:
+            print(f"File not found yet, will retry in 60 seconds")
+            return False
+        print(f"File found! Continuing execution.")
+        return True
+    ```
+  </Accordion>
+  
+  <Accordion title="Implement timeout logic">
+    Don't let sensors wait forever. Implement maximum wait times:
+    
+    ```python
+    from datetime import datetime, timedelta
+    
+    @sensor
+    def check_with_timeout(*args, **kwargs) -> bool:
+        start_time = kwargs.get('__sensor_start_time')
+        if start_time is None:
+            # Store start time (simplified - use external storage in production)
+            start_time = datetime.now()
+        
+        # Check if we've exceeded timeout (e.g., 2 hours)
+        if datetime.now() - start_time > timedelta(hours=2):
+            raise Exception('Sensor timeout after 2 hours')
+        
+        return check_condition()
+    ```
+  </Accordion>
+  
+  <Accordion title="Use appropriate check intervals">
+    The default 60-second interval works for most cases. For faster checks, consider using event triggers instead of sensors.
+  </Accordion>
+  
+  <Accordion title="Make sensors idempotent">
+    Sensors should safely check conditions multiple times without side effects.
+  </Accordion>
+  
+  <Accordion title="Handle transient failures">
+    Network issues and temporary API failures are common. Build retry logic and error handling into sensors.
+  </Accordion>
+</AccordionGroup>
+
+## Sensors vs Event Triggers
+
+Choose between sensors and event triggers:
+
+| Use Sensors When | Use Event Triggers When |
+|-----------------|------------------------|
+| Polling is acceptable | Real-time response needed |
+| External system doesn't support events | Event infrastructure available |
+| Simple condition checking | Complex event patterns |
+| Development/testing | Production workloads |
+| Low frequency checks | High frequency updates |
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Triggers" icon="calendar" href="/orchestration/triggers">
+    Learn about time, event, and API triggers
+  </Card>
+  <Card title="Backfills" icon="clock-rotate-left" href="/orchestration/backfills">
+    Run pipelines for historical date ranges
+  </Card>
+</CardGroup>

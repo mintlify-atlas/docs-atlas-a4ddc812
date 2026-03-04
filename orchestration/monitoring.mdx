@@ -1,0 +1,614 @@
+---
+title: "Monitoring Pipeline Runs"
+description: "Monitor, debug, and troubleshoot pipeline execution"
+---
+
+Mage provides comprehensive monitoring capabilities for tracking pipeline runs, debugging failures, and analyzing performance.
+
+## Pipeline Run Status
+
+Pipeline runs track their execution through these statuses:
+
+```python
+class PipelineRunStatus(StrEnum):
+    INITIAL = 'initial'      # Created but not started
+    RUNNING = 'running'      # Currently executing
+    COMPLETED = 'completed'  # Successfully finished
+    FAILED = 'failed'        # Execution failed
+    CANCELLED = 'cancelled'  # Manually cancelled
+```
+
+### Checking Run Status
+
+<Tabs>
+  <Tab title="Python API">
+    ```python
+    from mage_ai.orchestration.db.models.schedules import PipelineRun
+
+    # Get a specific run
+    pipeline_run = PipelineRun.query.get(run_id)
+
+    print(f'Status: {pipeline_run.status}')
+    print(f'Started: {pipeline_run.started_at}')
+    print(f'Completed: {pipeline_run.completed_at}')
+
+    # Check if completed
+    if pipeline_run.status == PipelineRun.PipelineRunStatus.COMPLETED:
+        duration = pipeline_run.completed_at - pipeline_run.started_at
+        print(f'Duration: {duration}')
+
+    # Check for failures
+    if pipeline_run.status == PipelineRun.PipelineRunStatus.FAILED:
+        failed_blocks = pipeline_run.failed_block_runs
+        print(f'Failed blocks: {[b.block_uuid for b in failed_blocks]}')
+    ```
+  </Tab>
+  
+  <Tab title="Query Recent Runs">
+    ```python
+    from mage_ai.orchestration.db.models.schedules import PipelineRun
+    from datetime import datetime, timedelta
+    import pytz
+
+    # Get runs from the last 24 hours
+    yesterday = datetime.now(tz=pytz.UTC) - timedelta(hours=24)
+
+    recent_runs = PipelineRun.query.filter(
+        PipelineRun.pipeline_uuid == 'my_pipeline',
+        PipelineRun.created_at >= yesterday,
+    ).order_by(PipelineRun.created_at.desc()).all()
+
+    for run in recent_runs:
+        print(f'{run.id}: {run.status} at {run.created_at}')
+    ```
+  </Tab>
+  
+  <Tab title="Poll Until Complete">
+    ```python
+    from mage_ai.orchestration.triggers.utils import check_pipeline_run_status
+
+    # Wait for a run to complete
+    pipeline_run = check_pipeline_run_status(
+        pipeline_run,
+        poll_interval=30,  # Check every 30 seconds
+        poll_timeout=3600,  # Timeout after 1 hour
+        error_on_failure=True,  # Raise exception if failed
+        verbose=True,  # Print status updates
+    )
+
+    print(f'Final status: {pipeline_run.status}')
+    ```
+  </Tab>
+</Tabs>
+
+## Viewing Logs
+
+Access pipeline and block execution logs:
+
+### Pipeline Logs
+
+```python
+from mage_ai.data_preparation.logging.logger_manager_factory import LoggerManagerFactory
+
+# Get pipeline logs
+logger_manager = LoggerManagerFactory.get_logger_manager(
+    pipeline_uuid='my_pipeline',
+    partition=pipeline_run.execution_partition,
+)
+
+logs = logger_manager.get_logs()
+print(logs['content'])
+```
+
+### Scheduler Logs
+
+```python
+# Get scheduler logs
+scheduler_logger = LoggerManagerFactory.get_logger_manager(
+    pipeline_uuid='my_pipeline',
+    filename='scheduler.log',
+    partition=pipeline_run.execution_partition,
+)
+
+scheduler_logs = scheduler_logger.get_logs()
+print(scheduler_logs['content'])
+```
+
+### Block Logs
+
+```python
+from mage_ai.orchestration.db.models.schedules import BlockRun
+
+# Get logs for a specific block run
+block_run = BlockRun.query.get(block_run_id)
+
+logger_manager = LoggerManagerFactory.get_logger_manager(
+    pipeline_uuid=block_run.pipeline_run.pipeline_uuid,
+    block_uuid=block_run.block_uuid,
+    partition=block_run.pipeline_run.execution_partition,
+)
+
+block_logs = logger_manager.get_logs()
+print(block_logs['content'])
+```
+
+### Accessing All Logs for a Run
+
+```python
+pipeline_run = PipelineRun.query.get(run_id)
+
+# Returns [pipeline_logs, scheduler_logs]
+logs_list = pipeline_run.logs
+
+for log_dict in logs_list:
+    print(f"Log: {log_dict.get('name')}")
+    print(log_dict.get('content'))
+    print('-' * 80)
+```
+
+## Block Run Monitoring
+
+Monitor individual block executions within a pipeline run:
+
+```python
+from mage_ai.orchestration.db.models.schedules import BlockRun
+
+pipeline_run = PipelineRun.query.get(run_id)
+
+print(f'Total blocks: {pipeline_run.block_runs_count}')
+print(f'Completed: {pipeline_run.completed_block_runs_count}')
+
+# Get block runs by status
+initial_blocks = pipeline_run.initial_block_runs
+running_blocks = pipeline_run.running_block_runs
+completed_blocks = pipeline_run.completed_block_runs
+failed_blocks = pipeline_run.failed_block_runs
+
+print(f'\nBlock Status:')
+for block_run in pipeline_run.block_runs:
+    duration = ''
+    if block_run.started_at and block_run.completed_at:
+        duration = f' ({block_run.completed_at - block_run.started_at})'
+    print(f'  {block_run.block_uuid}: {block_run.status}{duration}')
+```
+
+### Block Run Status
+
+```python
+class BlockRunStatus(StrEnum):
+    INITIAL = 'initial'
+    QUEUED = 'queued'
+    RUNNING = 'running'
+    COMPLETED = 'completed'
+    FAILED = 'failed'
+    CANCELLED = 'cancelled'
+    UPSTREAM_FAILED = 'upstream_failed'
+```
+
+## Metrics and Performance
+
+Analyze pipeline run performance:
+
+```python
+pipeline_run = PipelineRun.query.get(run_id)
+
+# Runtime metrics
+if pipeline_run.completed_at and pipeline_run.started_at:
+    runtime = (pipeline_run.completed_at - pipeline_run.started_at).total_seconds()
+    print(f'Runtime: {runtime} seconds ({runtime/60:.2f} minutes)')
+
+# Get metrics data
+metrics = pipeline_run.metrics
+if metrics:
+    print(f'Metrics: {metrics}')
+
+# Historical runtime
+from mage_ai.orchestration.db.models.schedules import PipelineSchedule
+
+schedule = pipeline_run.pipeline_schedule
+runtime_history = schedule.runtime_history(sample_size=10)
+average_runtime = schedule.runtime_average(sample_size=10)
+
+print(f'Average runtime (last 10 runs): {average_runtime} seconds')
+print(f'Runtime history: {runtime_history}')
+```
+
+## Monitoring Statistics
+
+Query aggregated pipeline statistics:
+
+```python
+from mage_ai.orchestration.monitor.monitor_stats import MonitorStats, MonitorStatsType
+from datetime import datetime, timedelta
+
+monitor = MonitorStats()
+
+# Get pipeline run counts
+stats = monitor.get_stats(
+    stats_type=MonitorStatsType.PIPELINE_RUN_COUNT,
+    pipeline_uuid='my_pipeline',
+    start_time=(datetime.now() - timedelta(days=7)).isoformat(),
+    end_time=datetime.now().isoformat(),
+)
+
+print(f'Pipeline runs in last 7 days: {stats}')
+
+# Get runtime statistics
+runtime_stats = monitor.get_stats(
+    stats_type=MonitorStatsType.PIPELINE_RUN_TIME,
+    pipeline_uuid='my_pipeline',
+    start_time=(datetime.now() - timedelta(days=30)).isoformat(),
+)
+
+print(f'Runtime statistics: {runtime_stats}')
+```
+
+### Available Metric Types
+
+```python
+class MonitorStatsType(StrEnum):
+    PIPELINE_RUN_COUNT = 'pipeline_run_count'
+    PIPELINE_RUN_TIME = 'pipeline_run_time'
+    BLOCK_RUN_COUNT = 'block_run_count'
+    BLOCK_RUN_TIME = 'block_run_time'
+```
+
+## SLA Monitoring
+
+Track when pipelines exceed their Service Level Agreement:
+
+```python
+from mage_ai.orchestration.db.models.schedules import PipelineSchedule, PipelineRun
+
+# Check for SLA violations
+pipeline_schedule = PipelineSchedule.query.filter(
+    PipelineSchedule.pipeline_uuid == 'my_pipeline',
+    PipelineSchedule.status == ScheduleStatus.ACTIVE,
+).first()
+
+if pipeline_schedule.sla:
+    print(f'SLA: {pipeline_schedule.sla} seconds')
+    
+    # Find runs that passed SLA
+    sla_violations = PipelineRun.query.filter(
+        PipelineRun.pipeline_schedule_id == pipeline_schedule.id,
+        PipelineRun.passed_sla == True,
+    ).all()
+    
+    print(f'SLA violations: {len(sla_violations)}')
+    for run in sla_violations:
+        runtime = (run.completed_at - run.started_at).total_seconds()
+        print(f'  Run {run.id}: {runtime}s (SLA: {pipeline_schedule.sla}s)')
+```
+
+### Checking Active SLA Status
+
+```python
+def check_sla():
+    """
+    Check SLA for all running pipeline runs.
+    """
+    from mage_ai.orchestration.pipeline_scheduler import check_sla
+    
+    # This function is automatically called by the scheduler
+    check_sla()
+```
+
+## Querying Pipeline Runs
+
+### By Date Range
+
+```python
+from datetime import datetime, timedelta
+import pytz
+
+start_date = datetime(2024, 1, 1, tzinfo=pytz.UTC)
+end_date = datetime(2024, 1, 31, tzinfo=pytz.UTC)
+
+runs = PipelineRun.query.filter(
+    PipelineRun.pipeline_uuid == 'my_pipeline',
+    PipelineRun.execution_date >= start_date,
+    PipelineRun.execution_date <= end_date,
+).order_by(PipelineRun.execution_date).all()
+
+print(f'Found {len(runs)} runs in date range')
+```
+
+### By Status
+
+```python
+# Get all failed runs
+failed_runs = PipelineRun.query.filter(
+    PipelineRun.pipeline_uuid == 'my_pipeline',
+    PipelineRun.status == PipelineRun.PipelineRunStatus.FAILED,
+).order_by(PipelineRun.created_at.desc()).limit(10).all()
+
+print(f'Recent failures ({len(failed_runs)}):')
+for run in failed_runs:
+    print(f'  {run.id}: {run.execution_date}')
+```
+
+### By Schedule
+
+```python
+# Get runs for a specific trigger
+schedule = PipelineSchedule.query.filter(
+    PipelineSchedule.pipeline_uuid == 'my_pipeline',
+    PipelineSchedule.name == 'daily_trigger',
+).first()
+
+runs = PipelineRun.query.filter(
+    PipelineRun.pipeline_schedule_id == schedule.id,
+).order_by(PipelineRun.execution_date.desc()).limit(20).all()
+
+print(f'Last 20 runs for {schedule.name}:')
+for run in runs:
+    print(f'  {run.execution_date}: {run.status}')
+```
+
+## Troubleshooting Failed Runs
+
+### Identify Failure Cause
+
+```python
+pipeline_run = PipelineRun.query.get(failed_run_id)
+
+if pipeline_run.status == PipelineRun.PipelineRunStatus.FAILED:
+    print(f'Pipeline run {pipeline_run.id} failed')
+    
+    # Get failed blocks
+    failed_blocks = pipeline_run.failed_block_runs
+    print(f'Failed blocks: {len(failed_blocks)}')
+    
+    for block_run in failed_blocks:
+        print(f'\nBlock: {block_run.block_uuid}')
+        print(f'Status: {block_run.status}')
+        print(f'Started: {block_run.started_at}')
+        print(f'Failed: {block_run.updated_at}')
+        
+        # Get block logs
+        logger = LoggerManagerFactory.get_logger_manager(
+            pipeline_uuid=pipeline_run.pipeline_uuid,
+            block_uuid=block_run.block_uuid,
+            partition=pipeline_run.execution_partition,
+        )
+        logs = logger.get_logs()
+        print(f'\nLogs:\n{logs["content"]}')
+```
+
+### Retry Failed Run
+
+```python
+# Reset a failed run to retry
+failed_run = PipelineRun.query.get(run_id)
+
+if failed_run.status == PipelineRun.PipelineRunStatus.FAILED:
+    # Reset run status
+    failed_run.update(
+        status=PipelineRun.PipelineRunStatus.INITIAL,
+        started_at=None,
+        completed_at=None,
+    )
+    
+    # Reset failed block runs
+    for block_run in failed_run.block_runs:
+        if block_run.status in [
+            BlockRun.BlockRunStatus.FAILED,
+            BlockRun.BlockRunStatus.UPSTREAM_FAILED,
+        ]:
+            block_run.update(
+                status=BlockRun.BlockRunStatus.INITIAL,
+                started_at=None,
+                completed_at=None,
+            )
+    
+    print(f'Run {run_id} reset for retry')
+```
+
+### Analyze Failure Patterns
+
+```python
+from collections import Counter
+
+# Get all failed runs for a pipeline
+failed_runs = PipelineRun.query.filter(
+    PipelineRun.pipeline_uuid == 'my_pipeline',
+    PipelineRun.status == PipelineRun.PipelineRunStatus.FAILED,
+).all()
+
+# Count which blocks fail most often
+failed_block_uuids = []
+for run in failed_runs:
+    failed_block_uuids.extend([b.block_uuid for b in run.failed_block_runs])
+
+failure_counts = Counter(failed_block_uuids)
+
+print('Most common block failures:')
+for block_uuid, count in failure_counts.most_common(5):
+    print(f'  {block_uuid}: {count} failures')
+```
+
+## Real-Time Monitoring
+
+### Watch Pipeline Progress
+
+```python
+import time
+from mage_ai.orchestration.db import db_connection
+
+def monitor_pipeline_run(run_id, poll_interval=10):
+    """
+    Monitor a pipeline run in real-time.
+    """
+    while True:
+        db_connection.session.expire_all()
+        pipeline_run = PipelineRun.query.get(run_id)
+        
+        print(f'\nStatus: {pipeline_run.status}')
+        print(f'Blocks: {pipeline_run.completed_block_runs_count}/{pipeline_run.block_runs_count}')
+        
+        # Show running blocks
+        running_blocks = pipeline_run.running_block_runs
+        if running_blocks:
+            print('Running:', [b.block_uuid for b in running_blocks])
+        
+        # Exit if complete
+        if pipeline_run.status in [
+            PipelineRun.PipelineRunStatus.COMPLETED,
+            PipelineRun.PipelineRunStatus.FAILED,
+            PipelineRun.PipelineRunStatus.CANCELLED,
+        ]:
+            print(f'\nFinal status: {pipeline_run.status}')
+            break
+        
+        time.sleep(poll_interval)
+
+# Use it
+monitor_pipeline_run(run_id=123, poll_interval=5)
+```
+
+## Performance Analysis
+
+### Compare Run Times
+
+```python
+from mage_ai.orchestration.db.models.schedules import PipelineSchedule
+import matplotlib.pyplot as plt
+
+schedule = PipelineSchedule.query.filter(
+    PipelineSchedule.pipeline_uuid == 'my_pipeline',
+).first()
+
+# Get recent completed runs
+recent_runs = schedule.recently_completed_pipeline_runs(sample_size=30)
+
+# Extract runtimes
+runtimes = []
+dates = []
+for run in recent_runs:
+    if run.completed_at and run.started_at:
+        runtime = (run.completed_at - run.started_at).total_seconds() / 60
+        runtimes.append(runtime)
+        dates.append(run.execution_date)
+
+# Plot runtime trend
+plt.figure(figsize=(12, 6))
+plt.plot(dates, runtimes, marker='o')
+plt.title('Pipeline Runtime Trend')
+plt.xlabel('Execution Date')
+plt.ylabel('Runtime (minutes)')
+plt.xticks(rotation=45)
+plt.tight_layout()
+plt.savefig('runtime_trend.png')
+
+print(f'Average runtime: {sum(runtimes)/len(runtimes):.2f} minutes')
+print(f'Min runtime: {min(runtimes):.2f} minutes')
+print(f'Max runtime: {max(runtimes):.2f} minutes')
+```
+
+### Block Performance
+
+```python
+# Analyze block-level performance
+from collections import defaultdict
+
+block_runtimes = defaultdict(list)
+
+for run in recent_runs:
+    for block_run in run.block_runs:
+        if block_run.completed_at and block_run.started_at:
+            runtime = (block_run.completed_at - block_run.started_at).total_seconds()
+            block_runtimes[block_run.block_uuid].append(runtime)
+
+print('Average block runtimes:')
+for block_uuid, runtimes in block_runtimes.items():
+    avg_runtime = sum(runtimes) / len(runtimes)
+    print(f'  {block_uuid}: {avg_runtime:.2f}s')
+```
+
+## Notifications
+
+Set up notifications for pipeline events:
+
+```python
+from mage_ai.orchestration.notification.config import NotificationConfig
+from mage_ai.orchestration.notification.sender import NotificationSender
+
+# Configure notifications
+notification_config = NotificationConfig.load(config={
+    'alert_on': ['trigger_failure', 'trigger_passed_sla'],
+    'email_config': {
+        'smtp_host': 'smtp.gmail.com',
+        'smtp_port': 587,
+        'smtp_user': 'your-email@gmail.com',
+        'smtp_password': 'your-password',
+    },
+})
+
+sender = NotificationSender(notification_config)
+
+# Send notifications
+sender.send_pipeline_run_failure_message(
+    pipeline=pipeline,
+    pipeline_run=pipeline_run,
+    error='Pipeline execution failed',
+)
+
+sender.send_pipeline_run_success_message(
+    pipeline=pipeline,
+    pipeline_run=pipeline_run,
+)
+```
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Set appropriate SLAs">
+    Configure SLAs to monitor pipeline performance:
+    
+    ```yaml
+    triggers:
+      - name: production_etl
+        sla: 3600  # 1 hour
+    ```
+  </Accordion>
+  
+  <Accordion title="Enable logging">
+    Use logging throughout your pipeline blocks:
+    
+    ```python
+    @data_loader
+    def load_data(*args, **kwargs):
+        print(f'Loading data for {kwargs["ds"]}')
+        # ... your code ...
+        print(f'Loaded {len(df)} rows')
+        return df
+    ```
+  </Accordion>
+  
+  <Accordion title="Monitor resource usage">
+    Track memory and CPU usage for resource-intensive pipelines.
+  </Accordion>
+  
+  <Accordion title="Set up alerting">
+    Configure notifications for failures and SLA violations so you can respond quickly.
+  </Accordion>
+  
+  <Accordion title="Review logs regularly">
+    Periodically review pipeline logs to identify patterns and potential issues before they become critical.
+  </Accordion>
+</AccordionGroup>
+
+## Next Steps
+
+<CardGroup cols={3}>
+  <Card title="Triggers" icon="calendar" href="/orchestration/triggers">
+    Configure pipeline triggers
+  </Card>
+  <Card title="Sensors" icon="tower-broadcast" href="/orchestration/sensors">
+    Use sensors to wait for conditions
+  </Card>
+  <Card title="Backfills" icon="clock-rotate-left" href="/orchestration/backfills">
+    Run historical backfills
+  </Card>
+</CardGroup>

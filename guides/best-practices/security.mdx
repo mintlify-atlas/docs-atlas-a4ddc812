@@ -1,0 +1,850 @@
+---
+title: "Security Best Practices"
+description: "Security guidelines for protecting your Mage data pipelines and infrastructure"
+---
+
+## Overview
+
+Security is critical for data pipelines handling sensitive information. This guide covers authentication, authorization, secrets management, and security best practices based on Mage's security architecture.
+
+## Authentication
+
+### Password Security
+
+Mage uses bcrypt for password hashing:
+
+```python
+# From mage_ai/authentication/passwords.py
+import bcrypt
+
+def generate_salt() -> str:
+    return bcrypt.gensalt(14)  # High cost factor for security
+
+def create_bcrypt_hash(password: str, salt: str) -> str:
+    password_bytes = password.encode()
+    password_hash_bytes = bcrypt.hashpw(password_bytes, salt)
+    return password_hash_bytes.decode()
+
+def verify_password(password: str, hash_from_database: str) -> bool:
+    password_bytes = password.encode()
+    hash_bytes = hash_from_database.encode()
+    return bcrypt.checkpw(password_bytes, hash_bytes)
+```
+
+<Note>
+Bcrypt with cost factor 14 provides strong password protection. Each password hash includes a unique salt, preventing rainbow table attacks.
+</Note>
+
+<Warning>
+**Never:**
+- Store passwords in plain text
+- Log password values
+- Transmit passwords over unencrypted connections
+- Share passwords across users
+- Hard-code passwords in code
+</Warning>
+
+### OAuth Integration
+
+Mage supports multiple OAuth providers:
+
+```python
+# From mage_ai/authentication/oauth/constants.py
+class ProviderName:
+    ACTIVE_DIRECTORY = 'active_directory'
+    AZURE_DEVOPS = 'azure_devops'
+    BITBUCKET = 'bitbucket'
+    GITHUB = 'github'
+    GITLAB = 'gitlab'
+    GHE = 'ghe'  # GitHub Enterprise
+    GOOGLE = 'google'
+    OKTA = 'okta'
+    OIDC_GENERIC = 'oidc_generic'
+```
+
+Configure OAuth in `metadata.yaml`:
+
+```yaml
+# metadata.yaml
+authentication:
+  mode: oauth
+  provider: google
+  
+  # OAuth configuration
+  oauth:
+    client_id: "{{ env_var('OAUTH_CLIENT_ID') }}"
+    client_secret: "{{ env_var('OAUTH_CLIENT_SECRET') }}"
+    redirect_uri: "https://mage.example.com/oauth/callback"
+    
+    # Optional: Restrict to domain
+    allowed_domains:
+      - example.com
+```
+
+<Tip>
+Use OAuth when possible:
+- ✅ Centralized user management
+- ✅ No password storage
+- ✅ Single sign-on (SSO)
+- ✅ Automatic access revocation
+- ✅ Multi-factor authentication support
+</Tip>
+
+### LDAP Authentication
+
+For enterprise environments:
+
+```yaml
+# metadata.yaml
+authentication:
+  mode: ldap
+  
+ldap_config:
+  server: "ldap://ldap.example.com:389"
+  # or for secure connection
+  server: "ldaps://ldap.example.com:636"
+  
+  bind_dn: "cn=admin,dc=example,dc=com"
+  bind_password: "{{ env_var('LDAP_BIND_PASSWORD') }}"
+  
+  base_dn: "ou=users,dc=example,dc=com"
+  user_filter: "(uid={username})"
+  
+  # Optional: Group-based access
+  authorization:
+    group_base_dn: "ou=groups,dc=example,dc=com"
+    admin_group: "cn=mage-admins,ou=groups,dc=example,dc=com"
+```
+
+## Authorization and Permissions
+
+### Role-Based Access Control (RBAC)
+
+Mage implements entity-based permissions:
+
+```python
+# From mage_ai/authentication/permissions/constants.py
+class EntityName:
+    Pipeline = 'Pipeline'
+    Block = 'Block'
+    Trigger = 'Trigger'
+    User = 'User'
+    Role = 'Role'
+```
+
+Define roles and permissions:
+
+```yaml
+# Permission configuration
+roles:
+  - name: Admin
+    permissions:
+      - entity: Pipeline
+        operations: [create, read, update, delete, execute]
+      - entity: Block  
+        operations: [create, read, update, delete, execute]
+      - entity: User
+        operations: [create, read, update, delete]
+        
+  - name: Developer
+    permissions:
+      - entity: Pipeline
+        operations: [create, read, update, execute]
+      - entity: Block
+        operations: [create, read, update, execute]
+        
+  - name: Viewer
+    permissions:
+      - entity: Pipeline
+        operations: [read]
+      - entity: Block
+        operations: [read]
+```
+
+<Note>
+Permissions are checked at the operation level. Users can only perform operations explicitly granted to their role.
+</Note>
+
+### Pipeline-Level Access Control
+
+Restrict access to specific pipelines:
+
+```yaml
+# In pipeline metadata.yaml
+access_control:
+  roles:
+    - Admin
+    - DataTeam
+  users:
+    - user1@example.com
+    - user2@example.com
+```
+
+## Secrets Management
+
+### Environment Variables
+
+Store sensitive configuration in environment variables:
+
+```python
+import os
+from mage_ai.data_preparation.decorators import data_loader
+
+@data_loader
+def load_from_api(*args, **kwargs):
+    """Load data using secrets from environment."""
+    
+    # Never hard-code credentials
+    api_key = os.getenv('API_KEY')
+    api_secret = os.getenv('API_SECRET')
+    
+    if not api_key or not api_secret:
+        raise ValueError('API credentials not configured')
+    
+    return fetch_data(api_key, api_secret)
+```
+
+<Warning>
+**Never commit secrets to version control:**
+- Add `.env` to `.gitignore`
+- Use secret management systems
+- Rotate secrets regularly
+- Use different secrets per environment
+</Warning>
+
+### Secret Storage
+
+Mage stores pipeline secrets securely:
+
+```python
+# From mage_ai/data_preparation/shared/secrets.py
+# Secrets are stored per project and pipeline
+# Directory structure: .secrets/{project_uuid}/pipelines/{pipeline_uuid}/
+
+def rename_pipeline_secrets_dir(
+    project_uuid: str,
+    old_pipeline_uuid: str, 
+    new_pipeline_uuid: str,
+):
+    """Rename secrets directory when pipeline is renamed."""
+    # Maintains secret isolation per pipeline
+```
+
+### Template Variables with Secrets
+
+Use template variables for secrets:
+
+```yaml
+# metadata.yaml
+executor_config:
+  # Template variables are rendered at runtime
+  aws_access_key_id: "{{ env_var('AWS_ACCESS_KEY_ID') }}"
+  aws_secret_access_key: "{{ env_var('AWS_SECRET_ACCESS_KEY') }}"
+  
+notification_config:
+  slack_webhook_url: "{{ env_var('SLACK_WEBHOOK_URL') }}"
+```
+
+```python
+# Access in blocks
+@data_loader
+def load_from_s3(*args, **kwargs):
+    config = kwargs.get('configuration', {})
+    
+    # Credentials come from templated env vars
+    from mage_ai.io.s3 import S3
+    s3 = S3(
+        aws_access_key_id=config.get('aws_access_key_id'),
+        aws_secret_access_key=config.get('aws_secret_access_key'),
+    )
+    return s3.load('s3://bucket/data.csv')
+```
+
+### AWS Secrets Manager Integration
+
+```python
+import boto3
+from mage_ai.data_preparation.decorators import data_loader
+
+@data_loader
+def load_with_secrets_manager(*args, **kwargs):
+    """Load secrets from AWS Secrets Manager."""
+    
+    secret_name = "mage/production/database"
+    region_name = "us-east-1"
+    
+    # Create secrets manager client
+    session = boto3.session.Session()
+    client = session.client(
+        service_name='secretsmanager',
+        region_name=region_name
+    )
+    
+    try:
+        response = client.get_secret_value(SecretId=secret_name)
+        secret = json.loads(response['SecretString'])
+        
+        # Use secrets
+        from mage_ai.io.postgres import Postgres
+        postgres = Postgres(
+            host=secret['host'],
+            database=secret['database'],
+            user=secret['username'],
+            password=secret['password'],
+        )
+        
+        return postgres.load(query)
+        
+    except Exception as e:
+        logger.error(f"Error retrieving secret: {e}")
+        raise
+```
+
+<Tip>
+Use dedicated secret management services:
+- AWS Secrets Manager
+- Google Secret Manager
+- Azure Key Vault
+- HashiCorp Vault
+- Kubernetes Secrets
+</Tip>
+
+## Network Security
+
+### HTTPS Configuration
+
+Always use HTTPS in production:
+
+```python
+# Run Mage with HTTPS
+# Use reverse proxy (nginx, Apache) or cloud load balancer
+
+# nginx configuration example
+server {
+    listen 443 ssl http2;
+    server_name mage.example.com;
+    
+    ssl_certificate /etc/ssl/certs/mage.crt;
+    ssl_certificate_key /etc/ssl/private/mage.key;
+    
+    # Strong SSL configuration
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers HIGH:!aNULL:!MD5;
+    ssl_prefer_server_ciphers on;
+    
+    location / {
+        proxy_pass http://localhost:6789;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
+```
+
+### IP Whitelisting
+
+Restrict access by IP address:
+
+```yaml
+# metadata.yaml
+security:
+  allowed_ips:
+    - 10.0.0.0/8        # Internal network
+    - 192.168.1.0/24    # Office network  
+    - 203.0.113.0/24    # VPN network
+```
+
+### API Authentication
+
+Secure API endpoints:
+
+```python
+@data_loader
+def load_from_external_api(*args, **kwargs):
+    """Call external API with authentication."""
+    import requests
+    
+    api_token = os.getenv('EXTERNAL_API_TOKEN')
+    
+    headers = {
+        'Authorization': f'Bearer {api_token}',
+        'Content-Type': 'application/json',
+    }
+    
+    # Use HTTPS
+    response = requests.get(
+        'https://api.example.com/data',
+        headers=headers,
+        timeout=30,  # Prevent hanging
+        verify=True,  # Verify SSL certificate
+    )
+    
+    response.raise_for_status()
+    return response.json()
+```
+
+## Data Security
+
+### Encryption at Rest
+
+Ensure data is encrypted when stored:
+
+```yaml
+# metadata.yaml
+# Use cloud storage with encryption enabled
+remote_variables_dir: s3://encrypted-bucket/mage-data
+
+# AWS S3 encryption configuration
+executor_config:
+  s3_server_side_encryption: AES256
+  # or use KMS
+  s3_server_side_encryption: aws:kms
+  s3_ssekms_key_id: "arn:aws:kms:region:account:key/key-id"
+```
+
+### Encryption in Transit
+
+Use encrypted connections:
+
+```python
+from mage_ai.io.postgres import Postgres
+
+@data_loader
+def load_from_database_secure(*args, **kwargs):
+    """Connect to database with SSL."""
+    
+    postgres = Postgres(
+        host='database.example.com',
+        database='analytics',
+        user=os.getenv('DB_USER'),
+        password=os.getenv('DB_PASSWORD'),
+        # Enable SSL
+        sslmode='require',
+        sslrootcert='/path/to/ca-cert.pem',
+    )
+    
+    return postgres.load(query)
+```
+
+### Data Masking
+
+Mask sensitive data in non-production environments:
+
+```python
+import hashlib
+from mage_ai.data_preparation.decorators import transformer
+
+@transformer
+def mask_sensitive_data(data, *args, **kwargs):
+    """Mask PII in non-production environments."""
+    
+    env = kwargs.get('env', 'production')
+    
+    if env != 'production':
+        # Mask email addresses
+        data['email'] = data['email'].apply(
+            lambda x: hashlib.sha256(x.encode()).hexdigest()[:16] + '@masked.com'
+        )
+        
+        # Mask phone numbers
+        data['phone'] = 'XXX-XXX-' + data['phone'].str[-4:]
+        
+        # Mask credit card numbers
+        data['cc_number'] = 'XXXX-XXXX-XXXX-' + data['cc_number'].str[-4:]
+    
+    return data
+```
+
+### PII Handling
+
+Implement proper PII protection:
+
+```python
+@transformer
+def handle_pii_data(data, *args, **kwargs):
+    """
+    Handle personally identifiable information securely.
+    """
+    logger = kwargs.get('logger')
+    
+    # Identify PII columns
+    pii_columns = [
+        'email', 'phone', 'ssn', 'credit_card',
+        'address', 'name', 'date_of_birth'
+    ]
+    
+    # Log without PII
+    safe_columns = [c for c in data.columns if c not in pii_columns]
+    logger.info(f"Processing {len(data)} records with columns: {safe_columns}")
+    
+    # Apply encryption or hashing to PII
+    from cryptography.fernet import Fernet
+    encryption_key = os.getenv('ENCRYPTION_KEY').encode()
+    cipher = Fernet(encryption_key)
+    
+    for col in pii_columns:
+        if col in data.columns:
+            data[col] = data[col].apply(
+                lambda x: cipher.encrypt(str(x).encode()).decode() if pd.notna(x) else None
+            )
+    
+    return data
+```
+
+<Warning>
+**PII Protection Requirements:**
+- Encrypt PII at rest and in transit
+- Log access to PII data
+- Implement data retention policies
+- Enable audit trails
+- Comply with GDPR, CCPA, etc.
+- Regular security audits
+</Warning>
+
+## Audit Logging
+
+### Operation History
+
+Mage tracks operation history:
+
+```python
+# From mage_ai/authentication/operation_history/
+# Tracks:
+# - User actions (create, update, delete)
+# - Pipeline executions
+# - Block modifications
+# - Permission changes
+```
+
+Configure audit logging:
+
+```yaml
+# metadata.yaml
+logging_config:
+  level: INFO
+  
+  # Enable audit logging
+  audit:
+    enabled: true
+    destination: s3://audit-logs/mage/
+    retention_days: 365
+    
+    # Events to log
+    events:
+      - user_login
+      - user_logout
+      - pipeline_create
+      - pipeline_update
+      - pipeline_execute
+      - block_create
+      - block_update
+      - permission_change
+```
+
+### Custom Audit Logs
+
+```python
+import json
+from datetime import datetime
+
+@data_exporter
+def export_with_audit(data, *args, **kwargs):
+    """Export data with audit logging."""
+    logger = kwargs.get('logger')
+    user = kwargs.get('user', 'system')
+    execution_date = kwargs.get('execution_date')
+    
+    # Log data export
+    audit_entry = {
+        'timestamp': datetime.utcnow().isoformat(),
+        'user': user,
+        'action': 'data_export',
+        'pipeline': kwargs.get('pipeline_uuid'),
+        'block': kwargs.get('block_uuid'),
+        'execution_date': str(execution_date),
+        'record_count': len(data),
+        'destination': 'warehouse',
+    }
+    
+    logger.info(f"AUDIT: {json.dumps(audit_entry)}")
+    
+    # Proceed with export
+    export_to_warehouse(data)
+```
+
+## Container Security
+
+### Docker Security
+
+Secure Docker deployments:
+
+```dockerfile
+# Use official base images
+FROM mageai/mageai:latest
+
+# Run as non-root user
+RUN useradd -m -u 1000 mage
+USER mage
+
+# Don't include secrets in image
+# Use environment variables or secret management
+
+# Scan for vulnerabilities
+# docker scan mageai/mageai:latest
+```
+
+```yaml
+# docker-compose.yml
+version: '3.8'
+
+services:
+  mage:
+    image: mageai/mageai:latest
+    
+    # Security options
+    security_opt:
+      - no-new-privileges:true
+    
+    # Read-only root filesystem
+    read_only: true
+    tmpfs:
+      - /tmp
+    
+    # Resource limits
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 4G
+    
+    # Use secrets
+    secrets:
+      - db_password
+      - api_key
+    
+    # Network isolation
+    networks:
+      - mage_network
+
+secrets:
+  db_password:
+    file: ./secrets/db_password.txt
+  api_key:
+    file: ./secrets/api_key.txt
+
+networks:
+  mage_network:
+    driver: bridge
+```
+
+### Kubernetes Security
+
+```yaml
+# kubernetes/deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mage
+spec:
+  template:
+    spec:
+      # Service account with limited permissions
+      serviceAccountName: mage-executor
+      
+      # Security context
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+      
+      containers:
+      - name: mage
+        image: mageai/mageai:latest
+        
+        # Container security context
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+              - ALL
+        
+        # Resource limits
+        resources:
+          limits:
+            cpu: 2
+            memory: 4Gi
+          requests:
+            cpu: 1
+            memory: 2Gi
+        
+        # Environment variables from secrets
+        envFrom:
+        - secretRef:
+            name: mage-secrets
+        
+        # Volume mounts
+        volumeMounts:
+        - name: tmp
+          mountPath: /tmp
+      
+      volumes:
+      - name: tmp
+        emptyDir: {}
+```
+
+## Security Monitoring
+
+### Alert Configuration
+
+```python
+@callback
+def security_monitoring(*args, **kwargs):
+    """Monitor for security events."""
+    logger = kwargs.get('logger')
+    
+    # Check for suspicious activity
+    suspicious_events = detect_anomalies(kwargs)
+    
+    if suspicious_events:
+        alert_security_team(
+            severity='high',
+            events=suspicious_events,
+            pipeline=kwargs['pipeline_uuid'],
+            user=kwargs.get('user'),
+        )
+        
+        logger.warning(f"Security alert: {len(suspicious_events)} events detected")
+```
+
+### Vulnerability Scanning
+
+Regularly scan for vulnerabilities:
+
+```bash
+# Scan dependencies
+pip-audit
+
+# Scan Docker images  
+docker scan mageai/mageai:latest
+
+# Scan Kubernetes configs
+kubesec scan kubernetes/deployment.yaml
+
+# Static code analysis
+bandit -r blocks/
+```
+
+## Compliance
+
+### GDPR Compliance
+
+Implement data subject rights:
+
+```python
+@data_exporter
+def implement_right_to_erasure(data, *args, **kwargs):
+    """
+    Implement GDPR right to erasure (right to be forgotten).
+    """
+    customer_id_to_delete = kwargs.get('configuration', {}).get('customer_id')
+    
+    if customer_id_to_delete:
+        # Remove all data for customer
+        data = data[data['customer_id'] != customer_id_to_delete]
+        
+        # Log deletion for audit
+        logger.info(
+            f"GDPR: Erased data for customer_id={customer_id_to_delete}"
+        )
+    
+    return data
+```
+
+### SOC 2 Controls
+
+Implement required security controls:
+
+```yaml
+# metadata.yaml
+security:
+  # Access control
+  authentication:
+    required: true
+    mfa_required: true
+  
+  # Audit logging  
+  audit:
+    enabled: true
+    retention_days: 365
+  
+  # Encryption
+  encryption:
+    at_rest: required
+    in_transit: required
+  
+  # Change management
+  change_management:
+    approval_required: true
+    dual_control: true
+```
+
+## Security Checklist
+
+<Accordion title="Security Best Practices">
+
+**Authentication:**
+- ✅ Use OAuth/SSO instead of passwords when possible
+- ✅ Enable multi-factor authentication
+- ✅ Use bcrypt for password hashing (cost factor ≥ 12)
+- ✅ Implement password complexity requirements
+- ✅ Enforce password rotation policies
+- ❌ Never log or display passwords
+
+**Authorization:**
+- ✅ Implement role-based access control
+- ✅ Follow principle of least privilege
+- ✅ Review permissions regularly
+- ✅ Audit access to sensitive pipelines
+- ✅ Revoke access for departed users immediately
+
+**Secrets Management:**
+- ✅ Store secrets in environment variables
+- ✅ Use secret management services
+- ✅ Never commit secrets to version control
+- ✅ Rotate secrets regularly
+- ✅ Use different secrets per environment
+- ✅ Encrypt secrets at rest
+
+**Network Security:**
+- ✅ Use HTTPS for all connections
+- ✅ Implement IP whitelisting
+- ✅ Use VPN for remote access
+- ✅ Enable SSL for database connections
+- ✅ Configure firewalls appropriately
+
+**Data Security:**
+- ✅ Encrypt data at rest
+- ✅ Encrypt data in transit
+- ✅ Mask PII in non-production
+- ✅ Implement data retention policies
+- ✅ Enable audit logging
+- ✅ Regular security assessments
+
+**Container Security:**
+- ✅ Use official base images
+- ✅ Run as non-root user
+- ✅ Scan for vulnerabilities
+- ✅ Implement resource limits
+- ✅ Use read-only filesystems
+- ✅ Network isolation
+
+**Compliance:**
+- ✅ Implement GDPR data subject rights
+- ✅ Enable comprehensive audit logging
+- ✅ Document security controls
+- ✅ Regular security training
+- ✅ Incident response procedures
+
+</Accordion>

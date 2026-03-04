@@ -1,0 +1,564 @@
+---
+title: 'Using Variables and Secrets'
+description: 'Learn how to work with variables, outputs, and secrets in Mage pipelines'
+---
+
+## Overview
+
+Mage provides a comprehensive variable management system for passing data between blocks, storing intermediate results, and managing configuration and secrets.
+
+## Variable Manager
+
+The VariableManager handles all variable storage and retrieval:
+
+```python
+# From mage_ai/data_preparation/variable_manager.py
+
+class VariableManager:
+    def __init__(self, repo_path=None, variables_dir=None):
+        """
+        Initialize the VariableManager.
+        
+        Args:
+            repo_path: Root directory of the repository
+            variables_dir: Directory where variables are stored
+        """
+        self.repo_path = repo_path or get_repo_path()
+        self.variables_dir = variables_dir or get_variables_dir(
+            repo_path=self.repo_path
+        )
+        self.storage = LocalStorage()
+```
+
+## Variable Storage Backends
+
+Mage supports multiple storage backends:
+
+```python
+# Local storage (default)
+class VariableManager:
+    storage = LocalStorage()
+
+# S3 storage
+class S3VariableManager(VariableManager):
+    def __init__(self, repo_path=None, variables_dir=None):
+        super().__init__(repo_path=repo_path, variables_dir=variables_dir)
+        from mage_ai.data_preparation.storage.s3_storage import S3Storage
+        self.storage = S3Storage(dirpath=variables_dir)
+
+# GCS storage  
+class GCSVariableManager(VariableManager):
+    def __init__(self, repo_path=None, variables_dir=None):
+        super().__init__(repo_path=repo_path, variables_dir=variables_dir)
+        from mage_ai.data_preparation.storage.gcs_storage import GCSStorage
+        self.storage = GCSStorage(dirpath=variables_dir)
+```
+
+## Block Output Variables
+
+Block outputs are automatically stored as variables:
+
+```python
+# From mage_ai/data_preparation/variable_manager.py
+
+def add_variable(
+    self,
+    pipeline_uuid: str,
+    block_uuid: str,
+    variable_uuid: str,
+    data: Any,
+    partition: Optional[str] = None,
+    variable_type: Optional[VariableType] = None,
+    **kwargs
+) -> Variable:
+    """
+    Store a variable for a block.
+    
+    Args:
+        pipeline_uuid: Pipeline identifier
+        block_uuid: Block identifier  
+        variable_uuid: Variable name (e.g., 'output_0')
+        data: The data to store
+        partition: Execution partition (e.g., date)
+        variable_type: Type of variable (DataFrame, dict, etc.)
+    """
+    # Infer variable type if not provided
+    variable_type, basic_iterable = infer_variable_type(
+        data,
+        repo_path=self.repo_path,
+        variable_type=variable_type,
+    )
+    
+    variable = Variable(
+        clean_name(variable_uuid),
+        self.pipeline_path(pipeline_uuid),
+        block_uuid,
+        partition=partition,
+        storage=self.storage,
+        variable_type=variable_type,
+        variables_dir=self.variables_dir,
+    )
+    
+    # Write data to storage
+    variable.write_data(data)
+    
+    return variable
+```
+
+## Variable Types
+
+Mage automatically infers and tracks variable types:
+
+```python
+# From mage_ai/data_preparation/models/variables/constants.py
+
+class VariableType(str, Enum):
+    DATAFRAME = 'dataframe'                    # Pandas DataFrame
+    POLARS_DATAFRAME = 'polars_dataframe'      # Polars DataFrame  
+    SERIES_PANDAS = 'series_pandas'            # Pandas Series
+    SERIES_POLARS = 'series_polars'            # Polars Series
+    SPARK_DATAFRAME = 'spark_dataframe'        # Spark DataFrame
+    DICT = 'dict'                              # Python dict
+    LIST = 'list'                              # Python list
+    ITERABLE = 'iterable'                      # Iterator/generator
+    GEO_DATAFRAME = 'geo_dataframe'            # GeoPandas GeoDataFrame
+```
+
+## Accessing Variables in Blocks
+
+### Input Variables from Upstream Blocks
+
+```python
+@transformer
+def transform(data, *args, **kwargs):
+    """
+    Args:
+        data: Output from first upstream block (automatically loaded)
+        *args: Outputs from additional upstream blocks
+        **kwargs: Global variables and metadata
+    """
+    # First upstream block output
+    df1 = data
+    
+    # Second upstream block output (if exists)
+    if args:
+        df2 = args[0]
+    
+    return transformed_data
+```
+
+### Global Variables
+
+```python
+@data_loader
+def load_data(**kwargs):
+    """
+    Access global variables from kwargs.
+    """
+    # Environment variables
+    env = kwargs.get('env')  # 'dev', 'staging', 'prod'
+    
+    # Execution metadata
+    execution_date = kwargs.get('execution_date')
+    execution_partition = kwargs.get('execution_partition')
+    
+    # Pipeline variables
+    api_key = kwargs.get('api_key')
+    database_url = kwargs.get('database_url')
+    
+    # Custom runtime variables
+    batch_size = kwargs.get('batch_size', 1000)
+    
+    return data
+```
+
+## Managing Global Variables
+
+### Setting Global Variables
+
+```python
+# From mage_ai/data_preparation/variable_manager.py
+
+def set_global_variable(
+    pipeline_uuid: str,
+    key: str,
+    value: Any,
+    repo_path: str = None,
+) -> None:
+    """
+    Set a global variable for a pipeline.
+    
+    Args:
+        pipeline_uuid: Pipeline identifier
+        key: Variable name
+        value: Variable value
+    """
+    from mage_ai.data_preparation.models.pipeline import Pipeline
+    
+    pipeline = Pipeline.get(pipeline_uuid, repo_path=repo_path)
+    
+    if pipeline.variables is None:
+        pipeline.variables = get_global_variables(pipeline_uuid)
+    
+    pipeline.update_global_variable(key, value)
+```
+
+### Getting Global Variables
+
+```python
+def get_global_variables(
+    pipeline_uuid: str,
+    pipeline=None,
+    context_data: Dict = None,
+    repo_path: str = None,
+    variables_dir: str = None,
+) -> Dict[str, Any]:
+    """
+    Get all global variables for a pipeline.
+    
+    Returns:
+        Dict of variable name -> value
+    """
+    from mage_ai.data_preparation.models.pipeline import Pipeline
+    
+    pipeline = pipeline or Pipeline.get(
+        pipeline_uuid,
+        repo_path=repo_path,
+    )
+    
+    if pipeline.variables is not None:
+        return pipeline.variables
+    else:
+        # Load from storage
+        variable_manager = VariableManager(
+            repo_path=repo_path, 
+            variables_dir=variables_dir
+        )
+        variables = variable_manager.get_variables_by_block(
+            pipeline_uuid,
+            'global',
+        )
+        global_variables = dict()
+        for variable in variables:
+            global_variables[variable] = variable_manager.get_variable(
+                pipeline_uuid,
+                'global',
+                variable,
+            )
+        return global_variables
+```
+
+### Deleting Global Variables
+
+```python
+def delete_global_variable(
+    pipeline_uuid: str,
+    key: str,
+    repo_path: str = None,
+) -> None:
+    """
+    Delete a global variable.
+    """
+    from mage_ai.data_preparation.models.pipeline import Pipeline
+    
+    pipeline = Pipeline.get(pipeline_uuid, repo_path=repo_path)
+    if pipeline.variables is not None:
+        pipeline.delete_global_variable(key)
+    else:
+        VariableManager(
+            variables_dir=get_variables_dir(),
+        ).delete_variable(pipeline_uuid, 'global', key)
+```
+
+## Variable Storage Structure
+
+Variables are stored in a hierarchical structure:
+
+```python
+# From mage_ai/data_preparation/variable_manager.py
+
+def pipeline_path(self, pipeline_uuid: str) -> str:
+    """
+    Get the storage path for a pipeline's variables.
+    
+    Structure:
+    variables_dir/
+      pipelines/
+        [pipeline_uuid]/
+          variables/
+            [partition]/
+              [block_uuid]/
+                output_0.parquet
+                output_1.json
+              global/
+                api_key
+                database_url
+    """
+    path = os.path.join(self.variables_dir, 'pipelines', pipeline_uuid)
+    if type(self.storage) is LocalStorage:
+        if not self.storage.path_exists(path):
+            self.storage.makedirs(path, exist_ok=True)
+    return path
+```
+
+## Retrieving Block Variables
+
+```python
+def get_variable(
+    self,
+    pipeline_uuid: str,
+    block_uuid: str,
+    variable_uuid: str,
+    partition: Optional[str] = None,
+    variable_type: Optional[VariableType] = None,
+    sample: bool = False,
+    sample_count: Optional[int] = None,
+    **kwargs
+) -> Any:
+    """
+    Get a variable from a block.
+    
+    Args:
+        pipeline_uuid: Pipeline identifier
+        block_uuid: Block identifier
+        variable_uuid: Variable name
+        partition: Execution partition
+        variable_type: Expected variable type
+        sample: Whether to return a sample of the data
+        sample_count: Number of rows to sample
+    
+    Returns:
+        The variable data
+    """
+    variable = self.get_variable_object(
+        pipeline_uuid,
+        block_uuid,
+        variable_uuid,
+        partition=partition,
+        variable_type=variable_type,
+    )
+    
+    return variable.read_data(
+        sample=sample,
+        sample_count=sample_count,
+    )
+```
+
+## Secrets Management
+
+### Using Environment Variables
+
+```python
+import os
+
+@data_loader
+def load_data(**kwargs):
+    # Access secrets from environment variables
+    api_key = os.getenv('API_KEY')
+    db_password = os.getenv('DB_PASSWORD')
+    
+    # Or from global variables (stored encrypted)
+    api_key = kwargs.get('api_key')
+    
+    return data
+```
+
+### Storing Secrets
+
+<CodeGroup>
+```yaml metadata.yaml
+# Define variables in pipeline metadata
+variables:
+  api_key: "{{ env_var('API_KEY') }}"
+  database_url: "{{ env_var('DATABASE_URL') }}"
+  batch_size: 1000
+```
+
+```python Python
+# Set variables programmatically
+from mage_ai.data_preparation.variable_manager import set_global_variable
+
+set_global_variable(
+    'my_pipeline',
+    'api_key',
+    os.getenv('API_KEY'),
+)
+```
+</CodeGroup>
+
+<Warning>
+  Never hardcode secrets in block code. Always use environment variables or the secrets manager.
+</Warning>
+
+## Variable Retention and Cleanup
+
+```python
+# From mage_ai/data_preparation/variable_manager.py
+
+def clean_variables(self, pipeline_uuid: Optional[str] = None):
+    """
+    Clean old variables based on retention period.
+    """
+    repo_config = get_repo_config()
+    if repo_config.variables_retention_period is None:
+        return
+    
+    # Calculate retention cutoff
+    retention_ds = str_to_timedelta(repo_config.variables_retention_period)
+    min_partition = (
+        datetime.utcnow() - retention_ds
+    ).strftime(format='%Y%m%dT%H%M%S')
+    
+    # Remove old partitions
+    for partition in execution_partitions:
+        if partition <= min_partition:
+            self.storage.remove_dir(partition_path)
+```
+
+Configure in `metadata.yaml`:
+
+```yaml
+variables_retention_period: "30d"  # Keep variables for 30 days
+```
+
+## Variable Partitioning
+
+Variables can be partitioned by execution date:
+
+```python
+@data_loader  
+def load_data(**kwargs):
+    # Partition is automatically set from execution
+    execution_partition = kwargs.get('execution_partition')
+    # Format: '20240101T120000'
+    
+    # Load data for this partition
+    data = load_data_for_date(execution_partition)
+    
+    return data
+```
+
+Variables are stored per partition:
+```
+variables/
+  pipelines/
+    my_pipeline/
+      variables/
+        20240101T120000/
+          load_data/
+            output_0.parquet
+        20240102T120000/
+          load_data/
+            output_0.parquet
+```
+
+## Advanced Variable Patterns
+
+### Caching Expensive Operations
+
+```python
+from mage_ai.data_preparation.variable_manager import (
+    VariableManager,
+    get_variable,
+)
+
+@data_loader
+def load_cached_data(**kwargs):
+    pipeline_uuid = kwargs['pipeline_uuid']
+    block_uuid = kwargs['block_uuid']
+    
+    # Try to load from cache
+    try:
+        cached_data = get_variable(
+            pipeline_uuid,
+            block_uuid,
+            'cache_key',
+        )
+        print('Using cached data')
+        return cached_data
+    except:
+        # Cache miss - load fresh data
+        print('Loading fresh data')
+        data = expensive_data_load()
+        return data
+```
+
+### Passing Metadata Between Blocks
+
+```python
+@data_loader
+def load_data(**kwargs):
+    data = load_large_dataset()
+    
+    # Return data and metadata
+    metadata = {
+        'row_count': len(data),
+        'load_time': datetime.now().isoformat(),
+        'source': 'api',
+    }
+    
+    return [data, metadata]
+
+@transformer
+def transform(data, *args, **kwargs):
+    metadata = args[0]  # Second output from upstream
+    
+    print(f"Processing {metadata['row_count']} rows")
+    print(f"Loaded at {metadata['load_time']}")
+    
+    transformed = process(data)
+    return transformed
+```
+
+### Dynamic Variable Names
+
+```python
+@custom
+def store_multiple_outputs(**kwargs):
+    # Store multiple named outputs
+    results = {}
+    
+    for region in ['US', 'EU', 'APAC']:
+        data = load_data_for_region(region)
+        results[region] = data
+    
+    return results
+```
+
+## Best Practices
+
+<Steps>
+  <Step title="Use descriptive variable names">
+    Name variables clearly to indicate their content and purpose
+  </Step>
+  
+  <Step title="Clean up temporary variables">
+    Remove intermediate variables that aren't needed for downstream blocks
+  </Step>
+  
+  <Step title="Leverage partitioning">
+    Use partitions for time-series data to organize outputs by date
+  </Step>
+  
+  <Step title="Monitor variable storage size">
+    Large variables consume disk space - consider sampling or compression
+  </Step>
+  
+  <Step title="Use appropriate variable types">
+    Return DataFrames for tabular data, dicts for configuration, lists for collections
+  </Step>
+</Steps>
+
+<Tip>
+  Variables are automatically serialized based on type. DataFrames use Parquet, dicts use JSON, etc.
+</Tip>
+
+<Warning>
+  Variables are stored on disk. Very large outputs (>1GB) may impact performance. Consider streaming or batching for large datasets.
+</Warning>
+
+## Next Steps
+
+- Learn about [debugging and logging](/development/debugging)
+- Explore [testing blocks](/development/testing)  
+- Understand [writing block code](/development/writing-code)

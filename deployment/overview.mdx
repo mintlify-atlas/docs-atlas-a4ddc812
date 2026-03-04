@@ -1,0 +1,156 @@
+---
+title: 'Deployment Overview'
+description: 'Learn about the different deployment options available for Mage data platform'
+keywords: ['deployment', 'docker', 'kubernetes', 'cloud', 'setup']
+---
+
+Mage is a flexible data platform that can be deployed in various environments to suit your infrastructure needs. Whether you're running locally, on a single server, or orchestrating at scale in the cloud, Mage provides deployment options for every scenario.
+
+## Deployment Options
+
+Mage supports multiple deployment methods, from simple Docker containers to enterprise-grade Kubernetes clusters.
+
+<CardGroup cols={2}>
+  <Card title="Docker" icon="docker" href="/deployment/docker">
+    Quick deployment using Docker containers. Ideal for development and single-server production deployments.
+  </Card>
+  <Card title="Kubernetes" icon="dharmachakra" href="/deployment/kubernetes">
+    Scale Mage across multiple nodes with Kubernetes orchestration. Perfect for high-availability production environments.
+  </Card>
+  <Card title="Cloud Providers" icon="cloud" href="/deployment/cloud-providers">
+    Deploy to AWS, GCP, or Azure using managed services like ECS, Cloud Run, and Azure Container Instances.
+  </Card>
+  <Card title="Configuration" icon="gear" href="/deployment/configuration">
+    Configure Mage with environment variables, authentication, and advanced settings.
+  </Card>
+</CardGroup>
+
+## Quick Start
+
+The fastest way to get started with Mage is using Docker:
+
+```bash
+docker pull mageai/mageai:latest
+docker run -it -p 6789:6789 -v $(pwd):/home/src mageai/mageai:latest
+```
+
+Access Mage at `http://localhost:6789`.
+
+## Architecture Overview
+
+Mage consists of the following core components:
+
+<Steps>
+  <Step title="Web Server">
+    The Mage web server runs on port 6789 by default and provides the notebook-style UI, API endpoints, and pipeline execution engine.
+  </Step>
+  <Step title="Data Storage">
+    Pipeline code, configurations, and metadata are stored in the `/home/src` directory. Mount this as a volume to persist your work.
+  </Step>
+  <Step title="Variables Directory">
+    Runtime variables, secrets, and output data are stored in the variables directory (default: `~/.mage_data`). Configure with `MAGE_DATA_DIR`.
+  </Step>
+  <Step title="Database (Optional)">
+    For production deployments, use PostgreSQL for metadata storage. Configure with `MAGE_DATABASE_CONNECTION_URL`.
+  </Step>
+</Steps>
+
+## Exposed Ports
+
+| Port | Service | Description |
+| ---- | ------- | ----------- |
+| 6789 | Web Server | Main Mage UI and API server |
+| 7789 | WebSocket | Real-time updates and terminal connections |
+
+## Storage Requirements
+
+<Info>
+  Mage requires persistent storage for pipeline code and data. Always mount volumes or use persistent storage solutions to avoid data loss.
+</Info>
+
+### Required Directories
+
+- **`/home/src`** - Project root containing pipelines, blocks, and configuration
+- **Variables directory** - Runtime data and secrets (configurable via `MAGE_DATA_DIR`)
+
+## Choosing the Right Deployment Method
+
+<Tabs>
+  <Tab title="Development">
+    **Recommended: Docker or Docker Compose**
+    
+    Perfect for local development with quick setup and easy teardown:
+    
+    ```bash
+    docker run -it -p 6789:6789 -v $(pwd):/home/src mageai/mageai:latest
+    ```
+  </Tab>
+  <Tab title="Single Server">
+    **Recommended: Docker or Docker Compose with PostgreSQL**
+    
+    Use Docker Compose to run Mage with a database for production-grade single-server deployments:
+    
+    ```yaml
+    services:
+      server:
+        image: mageai/mageai:latest
+        ports:
+          - "6789:6789"
+        volumes:
+          - ./mage_data:/home/src
+        environment:
+          - MAGE_DATABASE_CONNECTION_URL=postgresql://user:pass@database:5432/mage
+    ```
+  </Tab>
+  <Tab title="Kubernetes">
+    **Recommended: Kubernetes with Persistent Volumes**
+    
+    Deploy Mage with high availability, auto-scaling, and enterprise features:
+    
+    ```bash
+    kubectl apply -f mage-deployment.yaml
+    ```
+  </Tab>
+  <Tab title="Cloud Platform">
+    **Recommended: Managed Container Services**
+    
+    Use AWS ECS, GCP Cloud Run, or Azure Container Instances for serverless scaling:
+    
+    - **AWS**: ECS Fargate with EFS storage
+    - **GCP**: Cloud Run with Cloud Storage
+    - **Azure**: Container Instances with Azure Files
+  </Tab>
+</Tabs>
+
+## Environment Configuration
+
+Mage is configured through environment variables. Essential variables include:
+
+```bash
+# Core settings
+MAGE_DATA_DIR=/home/src/mage_data
+MAGE_DATABASE_CONNECTION_URL=postgresql://user:pass@host:5432/mage
+
+# Authentication
+REQUIRE_USER_AUTHENTICATION=True
+AUTHENTICATION_MODE=LOCAL
+
+# Scheduler
+SCHEDULER_TRIGGER_INTERVAL=10
+```
+
+See the [Configuration](/deployment/configuration) page for complete details.
+
+## Next Steps
+
+<CardGroup cols={3}>
+  <Card title="Docker Setup" icon="docker" href="/deployment/docker">
+    Deploy with Docker and Docker Compose
+  </Card>
+  <Card title="Kubernetes" icon="dharmachakra" href="/deployment/kubernetes">
+    Deploy on Kubernetes clusters
+  </Card>
+  <Card title="Cloud Deployment" icon="cloud" href="/deployment/cloud-providers">
+    Deploy to AWS, GCP, or Azure
+  </Card>
+</CardGroup>

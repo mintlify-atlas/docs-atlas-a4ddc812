@@ -1,0 +1,409 @@
+---
+title: '@data_loader'
+description: 'Decorator for data loading blocks in Mage'
+---
+
+## Overview
+
+The `@data_loader` decorator identifies a function as a data loading block in Mage. Data loaders are the entry points of a pipeline, responsible for fetching data from various sources like databases, APIs, files, or cloud storage.
+
+## Basic Usage
+
+```python
+from mage_ai.data_preparation.decorators import data_loader
+
+@data_loader
+def load_data(*args, **kwargs):
+    """
+    Load data from your source.
+    """
+    # Your data loading logic
+    return data
+```
+
+## Function Signature
+
+The decorated function should follow this signature:
+
+```python
+@data_loader
+def load_data(
+    *args,        # Upstream block outputs (if any)
+    **kwargs      # Global variables and configuration
+) -> Any:         # Returns data (DataFrame, dict, list, etc.)
+    pass
+```
+
+## Parameters
+
+The function decorated with `@data_loader` receives:
+
+<ParamField path="*args" type="tuple">
+  Outputs from upstream blocks. Typically, data loaders don't have upstream blocks, so this is usually empty.
+</ParamField>
+
+<ParamField path="**kwargs" type="dict">
+  Contains global variables and execution context:
+  - Global variables defined in the pipeline
+  - `execution_date`: Current execution timestamp
+  - `execution_partition`: Partition identifier for this run
+  - Custom variables passed during execution
+</ParamField>
+
+<ResponseField name="return" type="Any">
+  Can return any data type:
+  - pandas DataFrame
+  - polars DataFrame
+  - dict, list, or other Python objects
+  - Multiple outputs as tuple or list
+</ResponseField>
+
+## Examples
+
+### Load from CSV File
+
+```python
+import pandas as pd
+from mage_ai.data_preparation.decorators import data_loader
+
+@data_loader
+def load_data_from_csv(*args, **kwargs):
+    """
+    Load customer data from CSV file.
+    """
+    file_path = 'data/customers.csv'
+    df = pd.read_csv(file_path)
+    return df
+```
+
+### Load from Database
+
+```python
+import pandas as pd
+from mage_ai.data_preparation.decorators import data_loader
+from mage_ai.data_preparation.repo_manager import get_repo_path
+from mage_ai.io.config import ConfigFileLoader
+from mage_ai.io.postgres import Postgres
+
+@data_loader
+def load_data_from_postgres(*args, **kwargs):
+    """
+    Load data from PostgreSQL database.
+    """
+    query = 'SELECT * FROM customers WHERE created_at >= NOW() - INTERVAL \'7 days\''
+    config_path = os.path.join(get_repo_path(), 'io_config.yaml')
+    config_profile = 'default'
+
+    with Postgres.with_config(
+        ConfigFileLoader(config_path, config_profile)
+    ) as loader:
+        df = loader.load(query)
+    
+    return df
+```
+
+### Load from API
+
+```python
+import requests
+import pandas as pd
+from mage_ai.data_preparation.decorators import data_loader
+
+@data_loader
+def load_data_from_api(*args, **kwargs):
+    """
+    Load data from REST API.
+    """
+    api_url = 'https://api.example.com/customers'
+    api_key = kwargs.get('api_key')  # From global variables
+    
+    headers = {'Authorization': f'Bearer {api_key}'}
+    response = requests.get(api_url, headers=headers)
+    response.raise_for_status()
+    
+    data = response.json()
+    df = pd.DataFrame(data['results'])
+    
+    return df
+```
+
+### Load from S3
+
+```python
+import pandas as pd
+from mage_ai.data_preparation.decorators import data_loader
+from mage_ai.io.s3 import S3
+from mage_ai.io.config import ConfigFileLoader
+
+@data_loader
+def load_from_s3(*args, **kwargs):
+    """
+    Load data from AWS S3 bucket.
+    """
+    bucket_name = 'my-data-bucket'
+    object_key = 'customers/data.parquet'
+    
+    config_path = os.path.join(get_repo_path(), 'io_config.yaml')
+    config = ConfigFileLoader(config_path, 'default')
+    
+    df = S3.with_config(config).load(
+        bucket_name,
+        object_key,
+    )
+    
+    return df
+```
+
+### Load with Global Variables
+
+```python
+import pandas as pd
+from mage_ai.data_preparation.decorators import data_loader
+from datetime import datetime, timedelta
+
+@data_loader
+def load_with_date_filter(*args, **kwargs):
+    """
+    Load data using global variables for date filtering.
+    """
+    # Access global variables
+    env = kwargs.get('env', 'development')
+    days_back = kwargs.get('days_back', 7)
+    
+    start_date = datetime.now() - timedelta(days=days_back)
+    
+    print(f"Loading data for {env} environment")
+    print(f"Start date: {start_date}")
+    
+    # Load data with filters
+    df = pd.read_csv(
+        f's3://bucket/data/{env}/customers.csv',
+        parse_dates=['created_at']
+    )
+    df = df[df['created_at'] >= start_date]
+    
+    return df
+```
+
+### Load Multiple Outputs
+
+```python
+import pandas as pd
+from mage_ai.data_preparation.decorators import data_loader
+
+@data_loader
+def load_multiple_datasets(*args, **kwargs):
+    """
+    Load multiple datasets that will be passed to downstream blocks.
+    """
+    customers_df = pd.read_csv('data/customers.csv')
+    orders_df = pd.read_csv('data/orders.csv')
+    products_df = pd.read_csv('data/products.csv')
+    
+    # Return multiple dataframes
+    return customers_df, orders_df, products_df
+```
+
+### Load with Error Handling
+
+```python
+import pandas as pd
+from mage_ai.data_preparation.decorators import data_loader
+import logging
+
+logger = logging.getLogger(__name__)
+
+@data_loader
+def load_with_error_handling(*args, **kwargs):
+    """
+    Load data with comprehensive error handling.
+    """
+    try:
+        df = pd.read_csv('data/customers.csv')
+        
+        # Validate data
+        if df.empty:
+            raise ValueError("Loaded dataframe is empty")
+        
+        required_columns = ['customer_id', 'email', 'created_at']
+        missing_columns = set(required_columns) - set(df.columns)
+        if missing_columns:
+            raise ValueError(f"Missing required columns: {missing_columns}")
+        
+        logger.info(f"Successfully loaded {len(df)} records")
+        return df
+        
+    except FileNotFoundError:
+        logger.error("Data file not found")
+        raise
+    except pd.errors.EmptyDataError:
+        logger.error("Data file is empty")
+        raise
+    except Exception as e:
+        logger.error(f"Error loading data: {str(e)}")
+        raise
+```
+
+### Incremental Loading
+
+```python
+import pandas as pd
+from mage_ai.data_preparation.decorators import data_loader
+from mage_ai.data_preparation.variable_manager import get_global_variable, set_global_variable
+
+@data_loader
+def load_incremental(*args, **kwargs):
+    """
+    Load only new data since last execution.
+    """
+    pipeline_uuid = kwargs.get('pipeline_uuid')
+    
+    # Get last execution timestamp
+    last_execution = get_global_variable(
+        pipeline_uuid,
+        'last_execution_timestamp'
+    )
+    
+    if last_execution:
+        query = f"""
+            SELECT * FROM customers 
+            WHERE updated_at > '{last_execution}'
+        """
+    else:
+        query = "SELECT * FROM customers"
+    
+    # Load data
+    df = pd.read_sql(query, connection)
+    
+    # Update last execution timestamp
+    current_time = pd.Timestamp.now()
+    set_global_variable(
+        pipeline_uuid,
+        'last_execution_timestamp',
+        str(current_time)
+    )
+    
+    return df
+```
+
+## Best Practices
+
+### 1. Use Type Hints
+
+```python
+import pandas as pd
+from typing import Dict, Any
+
+@data_loader
+def load_data(*args, **kwargs: Dict[str, Any]) -> pd.DataFrame:
+    """
+    Type hints improve code clarity.
+    """
+    return pd.read_csv('data.csv')
+```
+
+### 2. Add Logging
+
+```python
+import logging
+
+logger = logging.getLogger(__name__)
+
+@data_loader
+def load_data(*args, **kwargs):
+    logger.info("Starting data load")
+    df = pd.read_csv('data.csv')
+    logger.info(f"Loaded {len(df)} records")
+    return df
+```
+
+### 3. Validate Data
+
+```python
+@data_loader
+def load_data(*args, **kwargs):
+    df = pd.read_csv('data.csv')
+    
+    # Validate
+    assert not df.empty, "Dataframe is empty"
+    assert 'id' in df.columns, "Missing 'id' column"
+    assert df['id'].is_unique, "IDs are not unique"
+    
+    return df
+```
+
+### 4. Use Configuration Files
+
+```python
+from mage_ai.io.config import ConfigFileLoader
+
+@data_loader
+def load_data(*args, **kwargs):
+    config = ConfigFileLoader('io_config.yaml', 'default')
+    # Use configuration
+    return data
+```
+
+## Common Patterns
+
+### Date Partitioned Loading
+
+```python
+from datetime import datetime
+
+@data_loader
+def load_partitioned_data(*args, **kwargs):
+    execution_date = kwargs.get('execution_date', datetime.now())
+    partition = execution_date.strftime('%Y-%m-%d')
+    
+    file_path = f's3://bucket/data/date={partition}/data.parquet'
+    df = pd.read_parquet(file_path)
+    
+    return df
+```
+
+### Retry Logic
+
+```python
+import time
+from typing import Callable
+
+def retry(func: Callable, max_attempts: int = 3, delay: int = 5):
+    for attempt in range(max_attempts):
+        try:
+            return func()
+        except Exception as e:
+            if attempt == max_attempts - 1:
+                raise
+            print(f"Attempt {attempt + 1} failed: {e}. Retrying...")
+            time.sleep(delay)
+
+@data_loader
+def load_with_retry(*args, **kwargs):
+    def _load():
+        return pd.read_csv('https://api.example.com/data.csv')
+    
+    return retry(_load, max_attempts=3, delay=5)
+```
+
+## Testing Data Loaders
+
+You can test data loaders by decorating test functions with `@test`:
+
+```python
+from mage_ai.data_preparation.decorators import test
+
+@data_loader
+def load_data(*args, **kwargs):
+    return pd.read_csv('data.csv')
+
+@test
+def test_output(output, *args):
+    """
+    Test that the data loader returns valid data.
+    """
+    assert output is not None, 'Output is undefined'
+    assert isinstance(output, pd.DataFrame), 'Output is not a DataFrame'
+    assert len(output) > 0, 'DataFrame is empty'
+    assert 'customer_id' in output.columns, 'Missing customer_id column'
+```

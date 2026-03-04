@@ -1,0 +1,515 @@
+---
+title: 'Custom Executors'
+description: 'Execute blocks on different compute environments and cloud platforms'
+icon: 'rocket'
+---
+
+## Overview
+
+Mage's executor system allows you to run pipeline blocks on different compute environments, from local execution to cloud-based containers and Kubernetes clusters. This flexibility enables you to optimize cost and performance for each block in your pipeline.
+
+## Executor Types
+
+Mage supports the following executor types (executor_factory.py:6-11):
+
+<CardGroup cols={3}>
+  <Card title="Local Python" icon="laptop">
+    Default executor running on the Mage server
+  </Card>
+  <Card title="PySpark" icon="fire">
+    Apache Spark for distributed processing
+  </Card>
+  <Card title="Kubernetes" icon="k">
+    Run blocks as Kubernetes jobs
+  </Card>
+  <Card title="AWS ECS" icon="aws">
+    Execute on Amazon ECS containers
+  </Card>
+  <Card title="GCP Cloud Run" icon="google">
+    Run on Google Cloud Run
+  </Card>
+  <Card title="Azure Container Instances" icon="microsoft">
+    Azure container-based execution
+  </Card>
+</CardGroup>
+
+## Executor Factory
+
+Mage uses the `ExecutorFactory` to dynamically select the appropriate executor (executor_factory.py:15-92):
+
+```python
+class ExecutorFactory:
+    @classmethod
+    def get_block_executor(
+        self,
+        pipeline: Pipeline,
+        block_uuid: str,
+        executor_type: Union[ExecutorType, str, None] = None,
+    ) -> BlockExecutor:
+        # Auto-detect or use specified executor
+        if executor_type is None:
+            block = pipeline.get_block(block_uuid)
+            if pipeline.type == PipelineType.PYSPARK:
+                executor_type = ExecutorType.PYSPARK
+            else:
+                executor_type = block.get_executor_type()
+        
+        # Return appropriate executor instance
+        if executor_type == ExecutorType.PYSPARK:
+            return PySparkBlockExecutor(...)
+        elif executor_type == ExecutorType.K8S:
+            return K8sBlockExecutor(...)
+        # ... etc
+```
+
+## Configuration Hierarchy
+
+Executor configuration follows a three-level hierarchy (pyspark_block_executor.py:31-36):
+
+<Steps>
+  <Step title="Repository Level (Lowest Priority)">
+    Default configuration in `metadata.yaml`:
+    ```yaml
+    executor_type: local_python
+    emr_config:
+      master_instance_type: m5.xlarge
+    ```
+  </Step>
+  
+  <Step title="Pipeline Level">
+    Override in pipeline metadata:
+    ```yaml
+    executor_type: k8s
+    executor_config:
+      namespace: mage-pipelines
+    ```
+  </Step>
+  
+  <Step title="Block Level (Highest Priority)">
+    Configure per block:
+    ```yaml
+    executor_type: ecs
+    executor_config:
+      task_definition: my-task
+    ```
+  </Step>
+</Steps>
+
+Configurations are merged with `merge_dict()` giving block-level settings the highest priority.
+
+## Setting Default Executor
+
+Set the default executor type via environment variable (executor_factory.py:16-21):
+
+```bash
+export DEFAULT_EXECUTOR_TYPE=k8s
+```
+
+Valid values:
+- `local_python` (default)
+- `pyspark`
+- `k8s`
+- `ecs`
+- `azure_container_instance`
+- `gcp_cloud_run`
+
+## Executor Type Detection
+
+Mage automatically determines the executor type (executor_factory.py:24-37, 128-139):
+
+```python
+def get_pipeline_executor_type(pipeline, executor_type=None):
+    if executor_type is None:
+        if pipeline.type == PipelineType.PYSPARK:
+            executor_type = ExecutorType.PYSPARK
+        else:
+            executor_type = pipeline.get_executor_type()
+            if executor_type == ExecutorType.LOCAL_PYTHON or executor_type is None:
+                # Use default executor type from environment
+                executor_type = get_default_executor_type()
+    return executor_type
+```
+
+## Kubernetes Executor
+
+### Configuration
+
+Configure Kubernetes execution in your repository metadata:
+
+```yaml
+k8s_executor_config:
+  job_name_prefix: mage-job
+  namespace: default
+  service_account_name: mage
+  
+  # Resource limits
+  resource_limits:
+    cpu: "2000m"
+    memory: "4Gi"
+  
+  # Resource requests
+  resource_requests:
+    cpu: "1000m"
+    memory: "2Gi"
+```
+
+### Usage
+
+Set executor type to `k8s` at any configuration level:
+
+<Tabs>
+  <Tab title="Pipeline Level">
+    ```yaml
+    # pipelines/my_pipeline/metadata.yaml
+    executor_type: k8s
+    executor_config:
+      namespace: data-pipelines
+    ```
+  </Tab>
+  
+  <Tab title="Block Level">
+    ```yaml
+    # In block configuration
+    executor_type: k8s
+    executor_config:
+      resource_limits:
+        memory: "8Gi"
+    ```
+  </Tab>
+</Tabs>
+
+The Kubernetes executor creates a Job for each block execution (executor_factory.py:160-164):
+
+```python
+return K8sBlockExecutor(
+    pipeline=pipeline,
+    block_uuid=block_uuid,
+    execution_partition=execution_partition,
+)
+```
+
+## AWS ECS Executor
+
+### Configuration
+
+```yaml
+ecs_config:
+  cluster: mage-cluster
+  task_definition: mage-task
+  
+  # Container overrides
+  container_name: mage
+  
+  # Network configuration
+  network_configuration:
+    awsvpcConfiguration:
+      subnets:
+        - subnet-12345
+      securityGroups:
+        - sg-12345
+      assignPublicIp: ENABLED
+```
+
+### Usage
+
+```yaml
+executor_type: ecs
+executor_config:
+  task_definition: my-custom-task
+```
+
+The ECS executor (executor_factory.py:150-154):
+
+```python
+return EcsBlockExecutor(
+    pipeline=pipeline,
+    block_uuid=block_uuid,
+    execution_partition=execution_partition,
+)
+```
+
+## GCP Cloud Run Executor
+
+### Configuration
+
+```yaml
+gcp_cloud_run_config:
+  project_id: my-gcp-project
+  region: us-central1
+  
+  # Service configuration
+  service_name: mage-executor
+  
+  # Resource limits
+  memory: 4Gi
+  cpu: "2"
+  timeout: 3600
+```
+
+### Usage
+
+```yaml
+executor_type: gcp_cloud_run
+executor_config:
+  memory: 8Gi
+  timeout: 7200
+```
+
+The Cloud Run executor (executor_factory.py:155-159):
+
+```python
+return GcpCloudRunBlockExecutor(
+    pipeline=pipeline,
+    block_uuid=block_uuid,
+    execution_partition=execution_partition,
+)
+```
+
+## Azure Container Instances Executor
+
+### Configuration
+
+```yaml
+azure_container_instance_config:
+  resource_group: mage-rg
+  container_group_name: mage-containers
+  
+  # Container configuration
+  cpu: 2.0
+  memory: 4.0
+  
+  # Environment variables
+  environment_variables:
+    ENV: production
+```
+
+### Usage
+
+```yaml
+executor_type: azure_container_instance
+executor_config:
+  cpu: 4.0
+  memory: 8.0
+```
+
+The Azure executor (executor_factory.py:145-149):
+
+```python
+return AzureContainerInstanceExecutor(
+    pipeline=pipeline,
+    block_uuid=block_uuid,
+    execution_partition=execution_partition,
+)
+```
+
+## Pipeline Executors
+
+For pipeline-level execution, use `get_pipeline_executor()` (executor_factory.py:40-92):
+
+```python
+executor = ExecutorFactory.get_pipeline_executor(
+    pipeline=pipeline,
+    execution_partition=partition,
+    executor_type=ExecutorType.K8S,
+)
+
+executor.execute()
+```
+
+Pipeline executors include:
+
+- `PipelineExecutor` - Local execution
+- `PySparkPipelineExecutor` - Spark cluster execution
+- `K8sPipelineExecutor` - Kubernetes-based execution
+- `EcsPipelineExecutor` - AWS ECS execution
+- `StreamingPipelineExecutor` - Real-time streaming
+
+## Block Executor Base Class
+
+All executors inherit from `BlockExecutor` (block_executor.py:51-168):
+
+```python
+class BlockExecutor:
+    RETRYABLE = True
+    
+    def __init__(
+        self,
+        pipeline,
+        block_uuid,
+        execution_partition: Optional[str] = None,
+        block_run_id: Optional[int] = None,
+    ):
+        self.pipeline = pipeline
+        self.block_uuid = block_uuid
+        self.execution_partition = execution_partition
+        self.block = pipeline.get_block(block_uuid)
+        
+    def execute(
+        self,
+        analyze_outputs: bool = False,
+        block_run_id: int = None,
+        global_vars: Dict = None,
+        **kwargs,
+    ) -> Dict:
+        # Execute block with retry logic
+        pass
+```
+
+## Retry Configuration
+
+All executors support retry logic (block_executor.py:596-615):
+
+```python
+retry_config = merge_dict(
+    pipeline.repo_config.retry_config or dict(),
+    block.retry_config or dict(),
+)
+
+@retry(
+    retries=retry_config.retries,
+    delay=retry_config.delay,
+    max_delay=retry_config.max_delay,
+    exponential_backoff=retry_config.exponential_backoff,
+)
+def execute_with_retry():
+    return self._execute(**kwargs)
+```
+
+Configure retries in metadata:
+
+```yaml
+retry_config:
+  retries: 3
+  delay: 5
+  max_delay: 60
+  exponential_backoff: true
+```
+
+## Execution Context
+
+Executors provide execution context to blocks (block_executor.py:126-153):
+
+- `global_vars` - Global variables and runtime arguments
+- `analyze_outputs` - Whether to analyze block outputs
+- `verify_output` - Verify output after execution
+- `update_status` - Update block status in metadata
+- `callback_url` - Webhook for status updates
+- `on_complete`, `on_failure`, `on_start` - Lifecycle callbacks
+
+## Best Practices
+
+<Steps>
+  <Step title="Use appropriate executors">
+    Match executor type to workload:
+    - Local: Development and lightweight tasks
+    - Kubernetes: Production workloads with autoscaling
+    - ECS/Cloud Run: Serverless execution
+    - PySpark: Large-scale data processing
+  </Step>
+  
+  <Step title="Configure resource limits">
+    Set appropriate CPU and memory limits to prevent resource exhaustion.
+  </Step>
+  
+  <Step title="Leverage configuration hierarchy">
+    Use repository-level defaults and override per pipeline/block as needed.
+  </Step>
+  
+  <Step title="Monitor execution">
+    Implement proper logging and monitoring for remote executors.
+  </Step>
+  
+  <Step title="Secure credentials">
+    Use IAM roles and service accounts instead of hardcoded credentials.
+  </Step>
+</Steps>
+
+## Example: Mixed Executor Pipeline
+
+```yaml
+# Pipeline configuration
+name: mixed_executor_pipeline
+type: python
+
+blocks:
+  - uuid: load_data
+    type: data_loader
+    executor_type: local_python
+    
+  - uuid: process_large_dataset
+    type: transformer
+    executor_type: pyspark
+    executor_config:
+      master_instance_type: m5.2xlarge
+      slave_instance_count: 4
+    
+  - uuid: ml_training
+    type: transformer
+    executor_type: k8s
+    executor_config:
+      resource_limits:
+        cpu: "8000m"
+        memory: "32Gi"
+      resource_requests:
+        cpu: "4000m"
+        memory: "16Gi"
+    
+  - uuid: export_results
+    type: data_exporter
+    executor_type: ecs
+    executor_config:
+      task_definition: export-task
+```
+
+## Troubleshooting
+
+### Executor not found
+
+Ensure the executor type is valid and properly configured in your environment.
+
+### Permission errors
+
+Verify that your cloud credentials and IAM roles have the necessary permissions.
+
+### Resource constraints
+
+Increase resource limits if blocks are failing due to OOM or CPU throttling.
+
+### Network connectivity
+
+Ensure executors can access required services (databases, APIs, etc.).
+
+<Warning>
+  Cloud-based executors incur additional costs. Monitor usage and optimize resource allocation.
+</Warning>
+
+## Advanced: Creating Custom Executors
+
+You can create custom executors by inheriting from `BlockExecutor`:
+
+```python
+from mage_ai.data_preparation.executors.block_executor import BlockExecutor
+
+class CustomExecutor(BlockExecutor):
+    def _execute(
+        self,
+        block_run_id: int = None,
+        global_vars: Dict = None,
+        **kwargs,
+    ) -> Dict:
+        # Custom execution logic
+        result = self.block.execute_sync(
+            global_vars=global_vars,
+            **kwargs
+        )
+        return result
+```
+
+Register your custom executor in the `ExecutorFactory`.
+
+## Additional Resources
+
+- [Kubernetes Documentation](https://kubernetes.io/docs/)
+- [AWS ECS Documentation](https://docs.aws.amazon.com/ecs/)
+- [Google Cloud Run Documentation](https://cloud.google.com/run/docs)
+- [Azure Container Instances Documentation](https://docs.microsoft.com/en-us/azure/container-instances/)

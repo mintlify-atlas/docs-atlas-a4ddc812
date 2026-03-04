@@ -1,0 +1,710 @@
+---
+title: 'Configuration Options'
+description: 'Configure Mage with environment variables, authentication, and advanced settings'
+keywords: ['configuration', 'environment-variables', 'authentication', 'settings']
+---
+
+Mage is configured through environment variables and configuration files. This guide covers all configuration options for authentication, database connections, scheduling, monitoring, and more.
+
+## Core Configuration
+
+### Essential Environment Variables
+
+These are the most important variables to configure for production:
+
+```bash
+# Data Directory
+MAGE_DATA_DIR=/home/src/mage_data
+
+# Database Connection (PostgreSQL recommended for production)
+MAGE_DATABASE_CONNECTION_URL=postgresql://user:password@host:5432/mage
+
+# Authentication
+REQUIRE_USER_AUTHENTICATION=True
+AUTHENTICATION_MODE=LOCAL
+
+# Public URL (for webhooks and OAuth callbacks)
+MAGE_PUBLIC_HOST=https://mage.yourdomain.com
+```
+
+## Data Storage Configuration
+
+<Tabs>
+  <Tab title="Data Directory">
+    Configure where Mage stores runtime data, variables, and secrets:
+    
+    ```bash
+    MAGE_DATA_DIR=/home/src/mage_data
+    ```
+    
+    **Default:** `~/.mage_data`
+    
+    This directory stores:
+    - Pipeline variables
+    - Secrets and credentials
+    - Output data and caches
+    - User-specific data
+  </Tab>
+  <Tab title="Database Connection">
+    Configure PostgreSQL for metadata storage:
+    
+    ```bash
+    MAGE_DATABASE_CONNECTION_URL=postgresql://user:password@host:5432/database
+    ```
+    
+    **Supported databases:**
+    - PostgreSQL (recommended)
+    - MySQL
+    - SQLite (development only)
+    
+    **Example connections:**
+    ```bash
+    # PostgreSQL
+    postgresql://mageuser:password@localhost:5432/mage
+    
+    # PostgreSQL with SSL
+    postgresql://user:pass@host:5432/mage?sslmode=require
+    
+    # MySQL
+    mysql://user:pass@host:3306/mage
+    ```
+  </Tab>
+  <Tab title="Variables Directory">
+    Override the variables directory location:
+    
+    ```bash
+    # In metadata.yaml
+    variables_dir: /custom/path/to/variables
+    
+    # Or as environment variable
+    MAGE_DATA_DIR=/custom/path/to/variables
+    ```
+    
+    The variables directory can be:
+    - Local filesystem path
+    - S3 bucket: `s3://bucket-name/path`
+    - GCS bucket: `gs://bucket-name/path`
+  </Tab>
+</Tabs>
+
+## Authentication Configuration
+
+### Local Authentication
+
+Enable local username/password authentication:
+
+```bash
+REQUIRE_USER_AUTHENTICATION=True
+AUTHENTICATION_MODE=LOCAL
+
+# Default admin credentials (change these!)
+DEFAULT_OWNER_EMAIL=admin@yourcompany.com
+DEFAULT_OWNER_PASSWORD=secure_password_here
+DEFAULT_OWNER_USERNAME=admin
+```
+
+<Warning>
+  Always change the default admin credentials in production. Set these as environment variables or Kubernetes secrets.
+</Warning>
+
+### OAuth Authentication
+
+<Tabs>
+  <Tab title="Google OAuth">
+    ```bash
+    AUTHENTICATION_MODE=GOOGLE_OAUTH
+    GOOGLE_CLIENT_ID=your-client-id.apps.googleusercontent.com
+    GOOGLE_CLIENT_SECRET=your-client-secret
+    OAUTH_DEFAULT_ACCESS=Viewer  # or Editor, Admin
+    ```
+  </Tab>
+  <Tab title="Active Directory">
+    ```bash
+    AUTHENTICATION_MODE=ACTIVE_DIRECTORY
+    ACTIVE_DIRECTORY_DIRECTORY_ID=your-directory-id
+    ACTIVE_DIRECTORY_CLIENT_ID=your-client-id
+    ACTIVE_DIRECTORY_CLIENT_SECRET=your-client-secret
+    ACTIVE_DIRECTORY_ROLES_MAPPING='{"group-id-1":"Admin","group-id-2":"Editor"}'
+    ```
+  </Tab>
+  <Tab title="Okta">
+    ```bash
+    AUTHENTICATION_MODE=OKTA
+    OKTA_DOMAIN_URL=https://your-domain.okta.com
+    OKTA_CLIENT_ID=your-client-id
+    OKTA_CLIENT_SECRET=your-client-secret
+    ```
+  </Tab>
+  <Tab title="LDAP">
+    ```bash
+    AUTHENTICATION_MODE=LDAP
+    LDAP_SERVER=ldap://ldap.yourcompany.com:389
+    LDAP_BIND_DN=cn=admin,dc=example,dc=com
+    LDAP_BIND_PASSWORD=admin_password
+    LDAP_BASE_DN=dc=example,dc=com
+    LDAP_AUTHENTICATION_FILTER=(uid={username})
+    LDAP_AUTHORIZATION_FILTER=(memberOf=cn=mage-users,ou=groups,dc=example,dc=com)
+    LDAP_ADMIN_USERNAME=admin
+    ```
+  </Tab>
+  <Tab title="OIDC (Generic)">
+    ```bash
+    AUTHENTICATION_MODE=OIDC
+    OIDC_CLIENT_ID=your-client-id
+    OIDC_CLIENT_SECRET=your-client-secret
+    OIDC_DISCOVERY_URL=https://your-oidc-provider.com/.well-known/openid-configuration
+    OIDC_ROLES_MAPPING='{"admin-group":"Admin","editor-group":"Editor"}'
+    ```
+  </Tab>
+</Tabs>
+
+### User Permissions
+
+Enable role-based access control:
+
+```bash
+REQUIRE_USER_AUTHENTICATION=True
+REQUIRE_USER_PERMISSIONS=True
+```
+
+**Available roles:**
+- **Admin** - Full access to all features
+- **Editor** - Create and edit pipelines, cannot manage users
+- **Viewer** - Read-only access
+
+### JWT Configuration
+
+```bash
+# JWT secret for OAuth tokens (generate a secure random string)
+JWT_SECRET=your-secure-jwt-secret-here
+
+# JWT secret for download tokens
+JWT_DOWNLOAD_SECRET=another-secure-secret
+
+# Access token expiry time in seconds (default: 30 days)
+MAGE_ACCESS_TOKEN_EXPIRY_TIME=2592000
+```
+
+<Tip>
+  Generate secure JWT secrets using: `python -c "import secrets; print(secrets.token_urlsafe(32))"`
+</Tip>
+
+## Server Configuration
+
+### Basic Server Settings
+
+```bash
+# Server logging verbosity
+SERVER_VERBOSITY=info  # debug, info, warning, error
+
+# Logging format
+SERVER_LOGGING_FORMAT=plaintext  # or json
+SERVER_LOGGING_TEMPLATE=%(levelname)s:%(name)s:%(message)s
+
+# Disable auto browser open on startup
+DISABLE_AUTO_BROWSER_OPEN=True
+
+# Disable server auto-reload on code changes
+DISABLE_AUTORELOAD=True
+
+# Hostname (useful in Kubernetes)
+HOSTNAME=mage-server-pod-abc123
+```
+
+### URL and Path Configuration
+
+```bash
+# Public host URL for webhooks and OAuth callbacks
+MAGE_PUBLIC_HOST=https://mage.yourdomain.com
+
+# Base path for routing (e.g., /mage)
+MAGE_BASE_PATH=mage
+
+# Separate base paths for frontend requests and backend routes
+MAGE_REQUESTS_BASE_PATH=mage
+MAGE_ROUTES_BASE_PATH=mage
+```
+
+**Example with base path:**
+- Without base path: `https://mage.yourdomain.com/pipelines`
+- With base path: `https://mage.yourdomain.com/mage/pipelines`
+
+### Terminal and Editor Settings
+
+```bash
+# Disable terminal access in UI
+DISABLE_TERMINAL=True
+
+# Disable pipeline editing (0=editable, 1=read-only, 2=hide edit buttons)
+DISABLE_NOTEBOOK_EDIT_ACCESS=0
+
+# Custom shell command
+SHELL_COMMAND=/bin/bash
+
+# Use unique terminal per user
+USE_UNIQUE_TERMINAL=True
+```
+
+## Scheduler Configuration
+
+```bash
+# Trigger interval in seconds (how often scheduler checks for jobs)
+SCHEDULER_TRIGGER_INTERVAL=10  # Default: 10 seconds
+
+# Run pipelines in a single process (disable multiprocessing)
+RUN_PIPELINE_IN_ONE_PROCESS=False
+```
+
+<Info>
+  Lower `SCHEDULER_TRIGGER_INTERVAL` values provide more precise scheduling but increase CPU usage. Values between 5-10 seconds are recommended for most use cases.
+</Info>
+
+## Performance and Concurrency
+
+```bash
+# Maximum concurrent pipeline runs
+CONCURRENCY_CONFIG_PIPELINE_RUN_LIMIT=5
+
+# Maximum concurrent block runs within a pipeline
+CONCURRENCY_CONFIG_BLOCK_RUN_LIMIT=10
+
+# File cache size in bytes
+MAX_FILE_CACHE_SIZE=1048576  # 1 MB
+
+# Maximum image preview size (for model visualizations)
+MAX_OUTPUT_IMAGE_PREVIEW_SIZE=5242880  # 5 MB
+```
+
+## Cloud Provider Credentials
+
+<Tabs>
+  <Tab title="AWS">
+    ```bash
+    # AWS credentials
+    AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE
+    AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
+    AWS_SESSION_TOKEN=temporary-session-token  # Optional
+    
+    # AWS region
+    AWS_REGION=us-east-1
+    
+    # ECS configuration (if deploying on ECS)
+    ECS_CLUSTER_NAME=mage-cluster
+    ECS_CONTAINER_NAME=mage-server
+    ECS_TASK_DEFINITION=mage-task
+    ```
+    
+    **Alternative:** Mount AWS credentials file:
+    ```bash
+    docker run -v ~/.aws:/root/.aws mageai/mageai:latest
+    ```
+  </Tab>
+  <Tab title="GCP">
+    ```bash
+    # GCP project configuration
+    GCP_PROJECT_ID=your-project-id
+    GCP_REGION=us-central1
+    
+    # Path to service account key file
+    path_to_keyfile=/path/to/credentials.json
+    # Or use GOOGLE_APPLICATION_CREDENTIALS
+    GOOGLE_APPLICATION_CREDENTIALS=/path/to/credentials.json
+    ```
+    
+    **Alternative:** Mount GCP credentials:
+    ```bash
+    docker run -v ~/.config/gcloud:/root/.config/gcloud mageai/mageai:latest
+    ```
+  </Tab>
+  <Tab title="Azure">
+    ```bash
+    # Azure credentials
+    AZURE_CLIENT_ID=your-client-id
+    AZURE_CLIENT_SECRET=your-client-secret
+    AZURE_TENANT_ID=your-tenant-id
+    
+    # Azure storage
+    AZURE_STORAGE_CONNECTION_STRING=DefaultEndpointsProtocol=https;AccountName=...
+    ```
+  </Tab>
+</Tabs>
+
+## Kubernetes Configuration
+
+When running in Kubernetes:
+
+```bash
+# Kubernetes namespace for job creation
+KUBE_NAMESPACE=mage
+
+# Cluster type
+CLUSTER_TYPE=K8S
+```
+
+<Info>
+  Mage automatically detects Kubernetes environments and uses the namespace from `metadata.namespace` if `KUBE_NAMESPACE` is not set.
+</Info>
+
+## Monitoring and Observability
+
+### Prometheus Metrics
+
+```bash
+ENABLE_PROMETHEUS=True
+```
+
+Access metrics at `/metrics` endpoint.
+
+### Sentry Error Tracking
+
+```bash
+SENTRY_DSN=https://your-sentry-dsn@sentry.io/project-id
+SENTRY_TRACES_SAMPLE_RATE=1.0  # 0.0 to 1.0
+SENTRY_SERVER_NAME=mage-production
+```
+
+### New Relic
+
+```bash
+ENABLE_NEW_RELIC=True
+NEW_RELIC_CONFIG_PATH=/path/to/newrelic.ini
+```
+
+### OpenTelemetry
+
+```bash
+# OTLP endpoint for traces
+OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
+OTEL_EXPORTER_OTLP_HTTP_ENDPOINT=http://otel-collector:4318
+
+# Exclude URLs from tracing
+OTEL_PYTHON_TORNADO_EXCLUDED_URLS=/api/statuses
+```
+
+### System Logs
+
+```bash
+# Log partitioning for large-scale deployments
+SYSTEM_LOGS_PARTITIONS=ds,hour  # Comma-separated partition columns
+SYSTEM_LOGS_POLL_INTERVAL=0.1  # Polling interval in seconds
+
+# Custom logs directory
+LOGS_DIR_PATH=/var/log/mage
+```
+
+## AI/ML Features
+
+```bash
+# Enable OpenAI integration
+ENABLE_OPEN_AI=True
+OPENAI_API_KEY=sk-...
+
+# Enable Hugging Face integration
+ENABLE_HUGGING_FACE=True
+HUGGINGFACE_API=https://api-inference.huggingface.co
+HUGGINGFACE_INFERENCE_API_TOKEN=hf_...
+```
+
+## Advanced Configuration
+
+### Memory Manager
+
+```bash
+# Memory management version (1 or 2)
+MEMORY_MANAGER_VERSION=2
+MEMORY_MANAGER_PANDAS_VERSION=2
+MEMORY_MANAGER_POLARS_VERSION=2
+
+# Variable data output caching
+VARIABLE_DATA_OUTPUT_META_CACHE=True
+```
+
+### Dynamic Blocks
+
+```bash
+# Dynamic blocks version (1 or 2)
+DYNAMIC_BLOCKS_VERSION=2
+```
+
+### Kernel Manager
+
+```bash
+# Kernel manager type
+KERNEL_MANAGER=default  # or "magic" for SparkMagic
+```
+
+### Redis Cache
+
+```bash
+REDIS_URL=redis://localhost:6379/0
+```
+
+### Debug Settings
+
+```bash
+# Enable debug mode
+DEBUG=True
+
+# Debug memory usage
+DEBUG_MEMORY=True
+
+# Debug file I/O operations
+DEBUG_FILE_IO=True
+
+# Hide environment variable values in logs
+HIDE_ENV_VAR_VALUES=True
+```
+
+## Configuration Files
+
+### metadata.yaml
+
+Project-level configuration in the repository root:
+
+```yaml metadata.yaml
+# Custom variables directory
+variables_dir: /custom/path/to/variables
+
+# Or use cloud storage
+variables_dir: s3://my-bucket/mage-variables
+
+# Project-specific settings
+project_uuid: my_project
+```
+
+### Environment File
+
+Create a `.env` file for local development:
+
+```bash .env
+# Database
+MAGE_DATABASE_CONNECTION_URL=postgresql://mageuser:magepassword@localhost:5432/mage
+
+# Authentication
+REQUIRE_USER_AUTHENTICATION=True
+AUTHENTICATION_MODE=LOCAL
+DEFAULT_OWNER_EMAIL=admin@company.com
+DEFAULT_OWNER_PASSWORD=secure_password
+
+# AWS (if needed)
+AWS_ACCESS_KEY_ID=your_key
+AWS_SECRET_ACCESS_KEY=your_secret
+
+# Scheduler
+SCHEDULER_TRIGGER_INTERVAL=10
+```
+
+<Warning>
+  Never commit `.env` files to version control. Add `.env` to your `.gitignore` file.
+</Warning>
+
+## Docker Compose Configuration
+
+Combine multiple configuration methods:
+
+```yaml docker-compose.yml
+version: '3'
+services:
+  server:
+    image: mageai/mageai:latest
+    env_file:
+      - .env  # Load from .env file
+    environment:
+      # Override specific variables
+      - MAGE_DATABASE_CONNECTION_URL=${DATABASE_URL}
+      - REQUIRE_USER_AUTHENTICATION=True
+    volumes:
+      - ./mage_data:/home/src
+      - ~/.aws:/root/.aws  # Mount AWS credentials
+```
+
+## Kubernetes ConfigMap and Secret
+
+<CodeGroup>
+
+```yaml configmap.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mage-config
+  namespace: mage
+data:
+  MAGE_DATA_DIR: "/home/src/mage_data"
+  SCHEDULER_TRIGGER_INTERVAL: "10"
+  SERVER_VERBOSITY: "info"
+  REQUIRE_USER_AUTHENTICATION: "True"
+  ENABLE_PROMETHEUS: "True"
+```
+
+```yaml secret.yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: mage-secrets
+  namespace: mage
+type: Opaque
+stringData:
+  MAGE_DATABASE_CONNECTION_URL: "postgresql://user:pass@host:5432/mage"
+  JWT_SECRET: "your-jwt-secret"
+  AWS_ACCESS_KEY_ID: "your-aws-key"
+  AWS_SECRET_ACCESS_KEY: "your-aws-secret"
+```
+
+</CodeGroup>
+
+## Complete Environment Variables Reference
+
+Here's a comprehensive list of all configuration variables from Mage's source code:
+
+<AccordionGroup>
+  <Accordion title="Authentication & Security">
+    ```bash
+    REQUIRE_USER_AUTHENTICATION=True
+    REQUIRE_USER_PERMISSIONS=False
+    AUTHENTICATION_MODE=LOCAL
+    JWT_SECRET=your-secret
+    JWT_DOWNLOAD_SECRET=your-download-secret
+    MAGE_ACCESS_TOKEN_EXPIRY_TIME=2592000
+    OAUTH_DEFAULT_ACCESS=Viewer
+    DEFAULT_OWNER_EMAIL=admin@admin.com
+    DEFAULT_OWNER_PASSWORD=admin
+    DEFAULT_OWNER_USERNAME=admin
+    HIDE_API_TRIGGER_TOKEN=False
+    ```
+  </Accordion>
+  <Accordion title="Server & Networking">
+    ```bash
+    MAGE_PUBLIC_HOST=http://localhost:6789
+    MAGE_BASE_PATH=
+    MAGE_REQUESTS_BASE_PATH=
+    MAGE_ROUTES_BASE_PATH=
+    HOSTNAME=
+    SERVER_VERBOSITY=info
+    SERVER_LOGGING_FORMAT=plaintext
+    SERVER_LOGGING_TEMPLATE=%(levelname)s:%(name)s:%(message)s
+    DISABLE_AUTO_BROWSER_OPEN=False
+    DISABLE_AUTORELOAD=False
+    ```
+  </Accordion>
+  <Accordion title="Database & Storage">
+    ```bash
+    MAGE_DATABASE_CONNECTION_URL=
+    MAGE_DATA_DIR=/home/src/mage_data
+    LOGS_DIR_PATH=
+    MAX_FILE_CACHE_SIZE=1048576
+    ```
+  </Accordion>
+  <Accordion title="Scheduler & Performance">
+    ```bash
+    SCHEDULER_TRIGGER_INTERVAL=10
+    RUN_PIPELINE_IN_ONE_PROCESS=False
+    CONCURRENCY_CONFIG_PIPELINE_RUN_LIMIT=
+    CONCURRENCY_CONFIG_BLOCK_RUN_LIMIT=
+    ```
+  </Accordion>
+  <Accordion title="Editor & UI">
+    ```bash
+    DISABLE_NOTEBOOK_EDIT_ACCESS=0
+    DISABLE_TERMINAL=False
+    SHELL_COMMAND=
+    USE_UNIQUE_TERMINAL=
+    MAX_OUTPUT_IMAGE_PREVIEW_SIZE=5242880
+    ```
+  </Accordion>
+  <Accordion title="Monitoring & Debugging">
+    ```bash
+    DEBUG=False
+    DEBUG_MEMORY=False
+    DEBUG_FILE_IO=False
+    HIDE_ENV_VAR_VALUES=True
+    ENABLE_PROMETHEUS=False
+    SENTRY_DSN=
+    SENTRY_TRACES_SAMPLE_RATE=1.0
+    SENTRY_SERVER_NAME=
+    ENABLE_NEW_RELIC=False
+    NEW_RELIC_CONFIG_PATH=
+    OTEL_EXPORTER_OTLP_ENDPOINT=
+    OTEL_EXPORTER_OTLP_HTTP_ENDPOINT=
+    OTEL_PYTHON_TORNADO_EXCLUDED_URLS=/api/statuses
+    ```
+  </Accordion>
+  <Accordion title="Cloud Providers">
+    ```bash
+    # AWS
+    AWS_ACCESS_KEY_ID=
+    AWS_SECRET_ACCESS_KEY=
+    AWS_SESSION_TOKEN=
+    ECS_CLUSTER_NAME=
+    ECS_CONTAINER_NAME=
+    ECS_TASK_DEFINITION=
+    
+    # GCP
+    GCP_PROJECT_ID=
+    GCP_REGION=
+    path_to_keyfile=
+    
+    # Kubernetes
+    KUBE_NAMESPACE=
+    CLUSTER_TYPE=
+    ```
+  </Accordion>
+  <Accordion title="AI/ML Features">
+    ```bash
+    ENABLE_OPEN_AI=True
+    OPENAI_API_KEY=
+    ENABLE_HUGGING_FACE=True
+    HUGGINGFACE_API=
+    HUGGINGFACE_INFERENCE_API_TOKEN=
+    ```
+  </Accordion>
+  <Accordion title="Advanced Settings">
+    ```bash
+    DYNAMIC_BLOCKS_VERSION=1
+    MEMORY_MANAGER_VERSION=1
+    MEMORY_MANAGER_PANDAS_VERSION=1
+    MEMORY_MANAGER_POLARS_VERSION=1
+    VARIABLE_DATA_OUTPUT_META_CACHE=False
+    KERNEL_MANAGER=default
+    REDIS_URL=
+    MAGE_CLUSTER_UUID=mage
+    ENABLE_USER_PROJECTS=False
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Configuration Best Practices
+
+<Steps>
+  <Step title="Use environment-specific configuration">
+    Maintain separate `.env` files for development, staging, and production environments.
+  </Step>
+  <Step title="Never commit secrets">
+    Use secret management systems (AWS Secrets Manager, GCP Secret Manager, Kubernetes Secrets) for sensitive data.
+  </Step>
+  <Step title="Enable authentication in production">
+    Always set `REQUIRE_USER_AUTHENTICATION=True` for production deployments.
+  </Step>
+  <Step title="Use PostgreSQL for metadata">
+    Configure `MAGE_DATABASE_CONNECTION_URL` with PostgreSQL for production reliability.
+  </Step>
+  <Step title="Configure monitoring">
+    Enable Prometheus, Sentry, or OpenTelemetry for production observability.
+  </Step>
+  <Step title="Set resource limits">
+    Configure concurrency limits to prevent resource exhaustion: `CONCURRENCY_CONFIG_PIPELINE_RUN_LIMIT` and `CONCURRENCY_CONFIG_BLOCK_RUN_LIMIT`.
+  </Step>
+</Steps>
+
+## Next Steps
+
+<CardGroup cols={3}>
+  <Card title="Docker Setup" icon="docker" href="/deployment/docker">
+    Deploy with Docker
+  </Card>
+  <Card title="Kubernetes" icon="dharmachakra" href="/deployment/kubernetes">
+    Deploy on Kubernetes
+  </Card>
+  <Card title="Cloud Providers" icon="cloud" href="/deployment/cloud-providers">
+    Deploy to AWS, GCP, or Azure
+  </Card>
+</CardGroup>

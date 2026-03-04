@@ -1,0 +1,422 @@
+---
+title: 'Spark Integration'
+description: 'Run PySpark workloads on EMR clusters and local Spark environments'
+icon: 'fire'
+---
+
+## Overview
+
+Mage provides native support for Apache Spark, enabling you to run distributed data processing workloads at scale. You can execute PySpark code locally or on cloud-based Spark clusters like AWS EMR.
+
+## Installation
+
+Install Mage with Spark support:
+
+```bash
+pip install mage-ai[spark]
+```
+
+This installs the necessary dependencies including boto3 and botocore for AWS integration (setup.py:122-125).
+
+## Pipeline Types
+
+Mage supports two ways to work with Spark:
+
+### 1. PySpark Pipeline
+
+A dedicated pipeline type for Spark workloads where all blocks run in a Spark context.
+
+### 2. Individual PySpark Blocks
+
+Run specific blocks using Spark while keeping other blocks in standard Python.
+
+## Executor Types
+
+Mage automatically selects the appropriate executor based on your pipeline configuration (executor_factory.py:15-37):
+
+<CardGroup cols={2}>
+  <Card title="Local PySpark" icon="laptop">
+    Run Spark locally on your Mage instance
+  </Card>
+  <Card title="EMR Executor" icon="aws">
+    Submit Spark jobs to AWS EMR clusters
+  </Card>
+</CardGroup>
+
+## Configuration
+
+### Environment Variables
+
+Set the default executor type:
+
+```bash
+export DEFAULT_EXECUTOR_TYPE=pyspark
+```
+
+Valid executor types (executor_factory.py:18-21):
+- `local_python` (default)
+- `pyspark`
+- `ecs`
+- `k8s`
+- `azure_container_instance`
+- `gcp_cloud_run`
+
+### Repository Configuration
+
+Configure EMR settings in your repository's `metadata.yaml`:
+
+```yaml
+emr_config:
+  master_instance_type: m5.xlarge
+  slave_instance_type: m5.xlarge
+  master_instance_count: 1
+  slave_instance_count: 2
+  
+  # EMR cluster configuration
+  ec2_key_name: your-key-pair
+  
+  # Spark JARs (optional)
+  spark_jars:
+    - s3://bucket/path/to/jar1.jar
+    - s3://bucket/path/to/jar2.jar
+
+s3_bucket: your-s3-bucket
+s3_path_prefix: mage/
+```
+
+### Block-Level Configuration
+
+Override executor settings at the block level:
+
+```yaml
+block_configuration:
+  executor_type: pyspark
+  executor_config:
+    master_instance_type: m5.2xlarge
+    slave_instance_count: 4
+```
+
+## Creating PySpark Blocks
+
+<Steps>
+  <Step title="Create a PySpark pipeline">
+    Create a new pipeline and set the type to "PySpark", or use a standard pipeline with individual PySpark blocks.
+  </Step>
+  
+  <Step title="Write PySpark code">
+    Use the SparkSession available in your block context.
+  </Step>
+  
+  <Step title="Configure execution">
+    Set executor type and cluster configuration.
+  </Step>
+</Steps>
+
+## Code Examples
+
+<CodeGroup>
+```python Data Loader
+from pyspark.sql import SparkSession
+
+if 'data_loader' not in globals():
+    from mage_ai.data_preparation.decorators import data_loader
+
+@data_loader
+def load_data(*args, **kwargs):
+    """
+    Load data using Spark
+    """
+    spark = SparkSession.builder.appName('MageApp').getOrCreate()
+    
+    # Read from S3
+    df = spark.read.parquet('s3://bucket/path/to/data')
+    
+    return df
+```
+
+```python Transformer
+from pyspark.sql import DataFrame
+from pyspark.sql.functions import col, when
+
+if 'transformer' not in globals():
+    from mage_ai.data_preparation.decorators import transformer
+
+@transformer
+def transform(df: DataFrame, *args, **kwargs) -> DataFrame:
+    """
+    Transform data using Spark SQL and DataFrame API
+    """
+    # Filter and transform
+    transformed_df = df.filter(col('amount') > 0) \
+        .withColumn(
+            'category',
+            when(col('amount') > 1000, 'high')
+            .when(col('amount') > 100, 'medium')
+            .otherwise('low')
+        )
+    
+    return transformed_df
+```
+
+```python Data Exporter
+from pyspark.sql import DataFrame
+
+if 'data_exporter' not in globals():
+    from mage_ai.data_preparation.decorators import data_exporter
+
+@data_exporter
+def export_data(df: DataFrame, *args, **kwargs):
+    """
+    Export data using Spark
+    """
+    # Write to S3 in Parquet format
+    df.write \
+        .mode('overwrite') \
+        .partitionBy('date') \
+        .parquet('s3://bucket/path/to/output')
+    
+    return df
+```
+</CodeGroup>
+
+## EMR Execution
+
+When using the PySpark executor on EMR, Mage automatically (pyspark_block_executor.py:38-97):
+
+<Steps>
+  <Step title="Upload execution script to S3">
+    Your block code is templated and uploaded to S3 (pyspark_block_executor.py:68-82).
+  </Step>
+  
+  <Step title="Upload bootstrap scripts">
+    Required bootstrap scripts are uploaded for cluster initialization.
+  </Step>
+  
+  <Step title="Launch or connect to EMR cluster">
+    Creates a new cluster or connects to an existing one based on configuration.
+  </Step>
+  
+  <Step title="Submit Spark job">
+    Submits the Spark job as an EMR step (pyspark_block_executor.py:84-97).
+  </Step>
+</Steps>
+
+### Execution Script Template
+
+Mage uses a Jinja template to generate the Spark execution script (pyspark_block_executor.py:69-80):
+
+```python
+template = template_env.get_template('pipeline_execution/spark_script.jinja')
+script = template.render(
+    block_uuid=block_uuid,
+    execution_partition_str=execution_partition,
+    global_vars=global_vars,
+    pipeline_config=pipeline.to_dict(include_content=True),
+    pipeline_uuid=pipeline_uuid,
+    repo_config=repo_config.to_dict(remote=True),
+    spark_log_path=log_uri,
+)
+```
+
+### S3 Path Structure
+
+Execution scripts are stored in S3 with the following structure (pyspark_block_executor.py:58-66):
+
+```
+s3://your-bucket/
+└── your-prefix/
+    └── scripts/
+        └── pipeline_uuid/
+            └── block_uuid.py
+```
+
+## Local Spark Development
+
+### Docker Setup
+
+Use the Spark-enabled Mage Docker image:
+
+```dockerfile
+FROM mageai/mageai:latest-spark
+
+# Add your Spark configuration
+COPY spark-defaults.conf /opt/spark/conf/
+```
+
+### Spark Configuration
+
+Configure Spark settings in your blocks:
+
+```python
+from pyspark import SparkConf
+from pyspark.sql import SparkSession
+
+conf = SparkConf() \
+    .setAppName('MageApp') \
+    .set('spark.executor.memory', '4g') \
+    .set('spark.executor.cores', '2') \
+    .set('spark.sql.shuffle.partitions', '200')
+
+spark = SparkSession.builder.config(conf=conf).getOrCreate()
+```
+
+## Pipeline Type Detection
+
+Mage automatically detects when to use PySpark execution (executor_factory.py:130-133):
+
+```python
+if pipeline.type == PipelineType.PYSPARK and (
+    block.type != BlockType.SENSOR or is_pyspark_code(block.content)
+):
+    executor_type = ExecutorType.PYSPARK
+```
+
+Blocks in a PySpark pipeline automatically use the PySpark executor unless they're sensors without Spark code.
+
+## Resource Management
+
+The EMR Resource Manager handles cluster lifecycle and resource allocation (pyspark_block_executor.py:25-36):
+
+```python
+resource_manager = EmrResourceManager(
+    s3_bucket=pipeline.repo_config.s3_bucket,
+    s3_path_prefix=pipeline.repo_config.s3_path_prefix,
+)
+
+# Configuration priority: block > pipeline > repository
+executor_config = merge_dict(
+    pipeline.repo_config.emr_config,
+    pipeline.executor_config,
+    block.executor_config,
+)
+```
+
+Configuration is merged with the following priority:
+1. Block-level configuration (highest priority)
+2. Pipeline-level configuration
+3. Repository-level configuration (lowest priority)
+
+## Best Practices
+
+<Steps>
+  <Step title="Partition your data">
+    Use appropriate partitioning strategies for better performance and cost optimization.
+  </Step>
+  
+  <Step title="Cache strategically">
+    Cache DataFrames that are reused multiple times:
+    ```python
+    df.cache()
+    ```
+  </Step>
+  
+  <Step title="Optimize shuffle operations">
+    Minimize data shuffling by using appropriate join strategies and partitioning.
+  </Step>
+  
+  <Step title="Use appropriate file formats">
+    Prefer columnar formats like Parquet or ORC for analytical workloads.
+  </Step>
+  
+  <Step title="Monitor cluster resources">
+    Right-size your EMR clusters based on workload requirements.
+  </Step>
+</Steps>
+
+## Advanced Features
+
+### Custom Spark JARs
+
+Include custom JARs in your Spark jobs (pyspark_block_executor.py:86-87):
+
+```yaml
+emr_config:
+  spark_jars:
+    - s3://bucket/custom-connector.jar
+    - s3://bucket/custom-library.jar
+```
+
+### Broadcast Variables
+
+Optimize joins with broadcast variables:
+
+```python
+from pyspark.sql.functions import broadcast
+
+# Broadcast small DataFrame for efficient joins
+result = large_df.join(broadcast(small_df), 'key')
+```
+
+### UDFs (User Defined Functions)
+
+```python
+from pyspark.sql.functions import udf
+from pyspark.sql.types import StringType
+
+@udf(returnType=StringType())
+def custom_transform(value):
+    return value.upper()
+
+df = df.withColumn('new_col', custom_transform(col('old_col')))
+```
+
+## Performance Tuning
+
+### Memory Configuration
+
+```yaml
+emr_config:
+  spark_config:
+    spark.executor.memory: 8g
+    spark.driver.memory: 4g
+    spark.executor.memoryOverhead: 1g
+```
+
+### Parallelism
+
+```python
+# Set shuffle partitions based on data size
+spark.conf.set('spark.sql.shuffle.partitions', '400')
+
+# Repartition DataFrame for optimal parallelism
+df = df.repartition(200)
+```
+
+### Adaptive Query Execution
+
+```python
+spark.conf.set('spark.sql.adaptive.enabled', 'true')
+spark.conf.set('spark.sql.adaptive.coalescePartitions.enabled', 'true')
+```
+
+## Troubleshooting
+
+### Out of Memory Errors
+
+- Increase executor memory
+- Increase `spark.executor.memoryOverhead`
+- Reduce `spark.sql.shuffle.partitions`
+- Use `.repartition()` or `.coalesce()` appropriately
+
+### Slow Performance
+
+- Check data skew with `.describe()` and `.show()`
+- Use broadcast joins for small DataFrames
+- Increase parallelism with more partitions
+- Cache intermediate results
+
+### EMR Connection Issues
+
+- Verify S3 bucket permissions
+- Check EMR security groups and network configuration
+- Ensure EC2 key pair is correctly configured
+
+<Warning>
+  Remember to terminate EMR clusters when not in use to avoid unnecessary costs.
+</Warning>
+
+## Additional Resources
+
+- [Apache Spark Documentation](https://spark.apache.org/docs/latest/)
+- [AWS EMR Best Practices](https://docs.aws.amazon.com/emr/latest/ManagementGuide/emr-plan-instances-guidelines.html)
+- [PySpark API Reference](https://spark.apache.org/docs/latest/api/python/)

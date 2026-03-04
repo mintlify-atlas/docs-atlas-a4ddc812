@@ -1,0 +1,821 @@
+---
+title: "Trigger Endpoints"
+description: "REST API endpoints for managing pipeline triggers and schedules"
+---
+
+## Overview
+
+Trigger endpoints allow you to configure and manage pipeline schedules, including time-based, event-based, and API triggers.
+
+## Base URL
+
+```
+http://localhost:6789/api/pipeline_schedules
+```
+
+## List Triggers
+
+Retrieve all triggers (pipeline schedules).
+
+```http
+GET /api/pipeline_schedules
+```
+
+### Query Parameters
+
+<ParamField query="_limit" type="integer">
+  Maximum number of triggers to return
+</ParamField>
+
+<ParamField query="_offset" type="integer">
+  Number of triggers to skip (for pagination)
+</ParamField>
+
+<ParamField query="pipeline_uuid" type="string">
+  Filter triggers for a specific pipeline
+</ParamField>
+
+<ParamField query="schedule_type[]" type="string">
+  Filter by schedule type (comma-separated)
+  
+  Options: `time`, `event`, `api`
+</ParamField>
+
+<ParamField query="schedule_interval[]" type="string">
+  Filter by schedule interval (comma-separated)
+  
+  Options: `@once`, `@hourly`, `@daily`, `@weekly`, `@monthly`, `@always_on`
+</ParamField>
+
+<ParamField query="status[]" type="string">
+  Filter by status (comma-separated)
+  
+  Options: `active`, `inactive`
+</ParamField>
+
+<ParamField query="tag[]" type="string">
+  Filter by tags (comma-separated)
+</ParamField>
+
+<ParamField query="order_by" type="string">
+  Field to order by
+  
+  Options: `created_at`, `name`, `pipeline_uuid`, `status`, `schedule_type`
+</ParamField>
+
+### Request Example
+
+<CodeGroup>
+
+```bash cURL
+curl -X GET "http://localhost:6789/api/pipeline_schedules?status[]=active" \
+  -H "API-Key: your_api_key" \
+  -H "OAUTH-TOKEN: your_access_token"
+```
+
+```python Python
+import requests
+
+url = "http://localhost:6789/api/pipeline_schedules"
+headers = {
+    "API-Key": "your_api_key",
+    "OAUTH-TOKEN": "your_access_token"
+}
+params = {
+    "status[]": "active",
+    "schedule_type[]": "time"
+}
+
+response = requests.get(url, headers=headers, params=params)
+triggers = response.json()
+```
+
+```javascript JavaScript
+const params = new URLSearchParams({
+  'status[]': 'active',
+  'schedule_type[]': 'time'
+});
+
+const response = await fetch(
+  `http://localhost:6789/api/pipeline_schedules?${params}`,
+  {
+    headers: {
+      'API-Key': 'your_api_key',
+      'OAUTH-TOKEN': 'your_access_token'
+    }
+  }
+);
+const triggers = await response.json();
+```
+
+</CodeGroup>
+
+### Response
+
+<ResponseField name="pipeline_schedules" type="array">
+  Array of trigger/schedule objects
+  
+  <ResponseField name="id" type="integer">
+    Unique identifier for the trigger
+  </ResponseField>
+  
+  <ResponseField name="name" type="string">
+    Name of the trigger
+  </ResponseField>
+  
+  <ResponseField name="pipeline_uuid" type="string">
+    UUID of the pipeline this trigger executes
+  </ResponseField>
+  
+  <ResponseField name="schedule_type" type="string">
+    Type of schedule: `time`, `event`, `api`
+  </ResponseField>
+  
+  <ResponseField name="schedule_interval" type="string">
+    Interval for time-based triggers
+  </ResponseField>
+  
+  <ResponseField name="start_time" type="string">
+    ISO 8601 timestamp when the schedule starts
+  </ResponseField>
+  
+  <ResponseField name="status" type="string">
+    Status: `active` or `inactive`
+  </ResponseField>
+  
+  <ResponseField name="variables" type="object">
+    Variables to pass to pipeline runs
+  </ResponseField>
+  
+  <ResponseField name="token" type="string">
+    Authentication token for API triggers
+  </ResponseField>
+  
+  <ResponseField name="settings" type="object">
+    Additional schedule settings
+  </ResponseField>
+</ResponseField>
+
+```json Example Response
+{
+  "pipeline_schedules": [
+    {
+      "id": 45,
+      "name": "daily_etl_trigger",
+      "pipeline_uuid": "example_pipeline",
+      "schedule_type": "time",
+      "schedule_interval": "@daily",
+      "start_time": "2024-03-04T00:00:00Z",
+      "status": "active",
+      "variables": {
+        "env": "production"
+      },
+      "settings": {
+        "skip_if_previous_running": true
+      },
+      "created_at": "2024-03-01T10:00:00Z",
+      "updated_at": "2024-03-04T10:00:00Z"
+    }
+  ]
+}
+```
+
+## Get Trigger
+
+Retrieve details for a specific trigger.
+
+```http
+GET /api/pipeline_schedules/{trigger_id}
+```
+
+### Path Parameters
+
+<ParamField path="trigger_id" type="integer" required>
+  The unique identifier of the trigger
+</ParamField>
+
+### Request Example
+
+<CodeGroup>
+
+```bash cURL
+curl -X GET "http://localhost:6789/api/pipeline_schedules/45" \
+  -H "API-Key: your_api_key" \
+  -H "OAUTH-TOKEN: your_access_token"
+```
+
+```python Python
+import requests
+
+url = "http://localhost:6789/api/pipeline_schedules/45"
+headers = {
+    "API-Key": "your_api_key",
+    "OAUTH-TOKEN": "your_access_token"
+}
+
+response = requests.get(url, headers=headers)
+trigger = response.json()
+```
+
+</CodeGroup>
+
+### Response
+
+```json
+{
+  "pipeline_schedule": {
+    "id": 45,
+    "name": "daily_etl_trigger",
+    "pipeline_uuid": "example_pipeline",
+    "schedule_type": "time",
+    "schedule_interval": "@daily",
+    "start_time": "2024-03-04T00:00:00Z",
+    "status": "active",
+    "variables": {
+      "env": "production"
+    },
+    "settings": {
+      "skip_if_previous_running": true,
+      "allow_blocks_to_fail": false
+    },
+    "event_matchers": [],
+    "created_at": "2024-03-01T10:00:00Z",
+    "updated_at": "2024-03-04T10:00:00Z"
+  }
+}
+```
+
+## Create Trigger
+
+Create a new pipeline trigger/schedule.
+
+```http
+POST /api/pipeline_schedules
+```
+
+### Request Body
+
+<ParamField body="name" type="string" required>
+  Name of the trigger
+</ParamField>
+
+<ParamField body="pipeline_uuid" type="string" required>
+  UUID of the pipeline to trigger
+</ParamField>
+
+<ParamField body="schedule_type" type="string" required>
+  Type of schedule
+  
+  Options: `time`, `event`, `api`
+</ParamField>
+
+<ParamField body="schedule_interval" type="string">
+  Schedule interval (required for time-based triggers)
+  
+  Options: `@once`, `@hourly`, `@daily`, `@weekly`, `@monthly`, `@always_on`, or cron expression
+</ParamField>
+
+<ParamField body="start_time" type="string">
+  ISO 8601 timestamp when the schedule should start
+</ParamField>
+
+<ParamField body="status" type="string">
+  Initial status
+  
+  Options: `active`, `inactive` (default: `inactive`)
+</ParamField>
+
+<ParamField body="variables" type="object">
+  Variables to pass to pipeline runs
+</ParamField>
+
+<ParamField body="settings" type="object">
+  Additional schedule settings
+</ParamField>
+
+<ParamField body="event_matchers" type="array">
+  Event matchers for event-based triggers
+</ParamField>
+
+### Request Example
+
+<CodeGroup>
+
+```bash Time-based Trigger
+curl -X POST "http://localhost:6789/api/pipeline_schedules" \
+  -H "API-Key: your_api_key" \
+  -H "OAUTH-TOKEN: your_access_token" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "pipeline_schedule": {
+      "name": "hourly_sync",
+      "pipeline_uuid": "data_sync_pipeline",
+      "schedule_type": "time",
+      "schedule_interval": "@hourly",
+      "start_time": "2024-03-05T00:00:00Z",
+      "status": "active",
+      "variables": {
+        "source": "api",
+        "destination": "warehouse"
+      }
+    }
+  }'
+```
+
+```bash API Trigger
+curl -X POST "http://localhost:6789/api/pipeline_schedules" \
+  -H "API-Key: your_api_key" \
+  -H "OAUTH-TOKEN: your_access_token" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "pipeline_schedule": {
+      "name": "api_webhook",
+      "pipeline_uuid": "webhook_pipeline",
+      "schedule_type": "api",
+      "status": "active"
+    }
+  }'
+```
+
+```python Python
+import requests
+from datetime import datetime, timedelta
+
+url = "http://localhost:6789/api/pipeline_schedules"
+headers = {
+    "API-Key": "your_api_key",
+    "OAUTH-TOKEN": "your_access_token",
+    "Content-Type": "application/json"
+}
+data = {
+    "pipeline_schedule": {
+        "name": "daily_report",
+        "pipeline_uuid": "reporting_pipeline",
+        "schedule_type": "time",
+        "schedule_interval": "@daily",
+        "start_time": (datetime.now() + timedelta(days=1)).isoformat(),
+        "status": "active",
+        "variables": {
+            "report_type": "summary"
+        },
+        "settings": {
+            "skip_if_previous_running": True
+        }
+    }
+}
+
+response = requests.post(url, headers=headers, json=data)
+trigger = response.json()
+```
+
+</CodeGroup>
+
+### Response
+
+```json
+{
+  "pipeline_schedule": {
+    "id": 46,
+    "name": "hourly_sync",
+    "pipeline_uuid": "data_sync_pipeline",
+    "schedule_type": "time",
+    "schedule_interval": "@hourly",
+    "start_time": "2024-03-05T00:00:00Z",
+    "status": "active",
+    "variables": {
+      "source": "api",
+      "destination": "warehouse"
+    },
+    "token": null,
+    "created_at": "2024-03-04T16:00:00Z"
+  }
+}
+```
+
+## Update Trigger
+
+Update an existing trigger.
+
+```http
+PUT /api/pipeline_schedules/{trigger_id}
+```
+
+### Path Parameters
+
+<ParamField path="trigger_id" type="integer" required>
+  The unique identifier of the trigger
+</ParamField>
+
+### Request Body
+
+<ParamField body="name" type="string">
+  Updated name
+</ParamField>
+
+<ParamField body="status" type="string">
+  Updated status: `active` or `inactive`
+</ParamField>
+
+<ParamField body="schedule_interval" type="string">
+  Updated schedule interval
+</ParamField>
+
+<ParamField body="start_time" type="string">
+  Updated start time
+</ParamField>
+
+<ParamField body="variables" type="object">
+  Updated variables
+</ParamField>
+
+<ParamField body="settings" type="object">
+  Updated settings
+</ParamField>
+
+### Request Example
+
+<CodeGroup>
+
+```bash cURL
+curl -X PUT "http://localhost:6789/api/pipeline_schedules/45" \
+  -H "API-Key: your_api_key" \
+  -H "OAUTH-TOKEN: your_access_token" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "pipeline_schedule": {
+      "status": "inactive",
+      "variables": {
+        "env": "staging"
+      }
+    }
+  }'
+```
+
+```python Python
+import requests
+
+url = "http://localhost:6789/api/pipeline_schedules/45"
+headers = {
+    "API-Key": "your_api_key",
+    "OAUTH-TOKEN": "your_access_token",
+    "Content-Type": "application/json"
+}
+data = {
+    "pipeline_schedule": {
+        "status": "inactive",
+        "variables": {
+            "env": "staging"
+        }
+    }
+}
+
+response = requests.put(url, headers=headers, json=data)
+trigger = response.json()
+```
+
+</CodeGroup>
+
+### Response
+
+```json
+{
+  "pipeline_schedule": {
+    "id": 45,
+    "name": "daily_etl_trigger",
+    "status": "inactive",
+    "variables": {
+      "env": "staging"
+    },
+    "updated_at": "2024-03-04T17:00:00Z"
+  }
+}
+```
+
+## Delete Trigger
+
+Delete a trigger.
+
+```http
+DELETE /api/pipeline_schedules/{trigger_id}
+```
+
+### Path Parameters
+
+<ParamField path="trigger_id" type="integer" required>
+  The unique identifier of the trigger to delete
+</ParamField>
+
+### Request Example
+
+<CodeGroup>
+
+```bash cURL
+curl -X DELETE "http://localhost:6789/api/pipeline_schedules/45" \
+  -H "API-Key: your_api_key" \
+  -H "OAUTH-TOKEN: your_access_token"
+```
+
+```python Python
+import requests
+
+url = "http://localhost:6789/api/pipeline_schedules/45"
+headers = {
+    "API-Key": "your_api_key",
+    "OAUTH-TOKEN": "your_access_token"
+}
+
+response = requests.delete(url, headers=headers)
+```
+
+</CodeGroup>
+
+### Response
+
+```json
+{
+  "pipeline_schedule": {
+    "id": 45,
+    "deleted": true
+  }
+}
+```
+
+## API Trigger Webhook
+
+Trigger a pipeline via API webhook (for API-type triggers).
+
+```http
+POST /api/pipeline_schedules/{trigger_id}/api_trigger
+```
+
+### Path Parameters
+
+<ParamField path="trigger_id" type="integer" required>
+  The unique identifier of the API trigger
+</ParamField>
+
+### Authentication
+
+For API triggers, use the trigger's token instead of the OAuth token:
+
+```bash
+Authorization: Bearer {trigger_token}
+```
+
+### Request Body
+
+<ParamField body="variables" type="object">
+  Runtime variables to pass to the pipeline run
+</ParamField>
+
+Any additional fields in the request body will be passed as `event_variables`.
+
+### Request Example
+
+<CodeGroup>
+
+```bash cURL
+curl -X POST "http://localhost:6789/api/pipeline_schedules/46/api_trigger" \
+  -H "Authorization: Bearer trigger_token_here" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "variables": {
+      "user_id": "12345",
+      "action": "signup"
+    },
+    "timestamp": "2024-03-04T16:30:00Z",
+    "source": "webhook"
+  }'
+```
+
+```python Python
+import requests
+
+url = "http://localhost:6789/api/pipeline_schedules/46/api_trigger"
+headers = {
+    "Authorization": "Bearer trigger_token_here",
+    "Content-Type": "application/json"
+}
+data = {
+    "variables": {
+        "user_id": "12345",
+        "action": "signup"
+    },
+    "timestamp": "2024-03-04T16:30:00Z",
+    "source": "webhook"
+}
+
+response = requests.post(url, headers=headers, json=data)
+run = response.json()
+```
+
+```javascript JavaScript
+const response = await fetch(
+  'http://localhost:6789/api/pipeline_schedules/46/api_trigger',
+  {
+    method: 'POST',
+    headers: {
+      'Authorization': 'Bearer trigger_token_here',
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      variables: {
+        user_id: '12345',
+        action: 'signup'
+      },
+      timestamp: '2024-03-04T16:30:00Z',
+      source: 'webhook'
+    })
+  }
+);
+const run = await response.json();
+```
+
+</CodeGroup>
+
+### Response
+
+```json
+{
+  "pipeline_run": {
+    "id": 125,
+    "pipeline_uuid": "webhook_pipeline",
+    "pipeline_schedule_id": 46,
+    "execution_date": "2024-03-04T16:30:00Z",
+    "status": "initial",
+    "variables": {
+      "user_id": "12345",
+      "action": "signup"
+    },
+    "event_variables": {
+      "timestamp": "2024-03-04T16:30:00Z",
+      "source": "webhook"
+    }
+  }
+}
+```
+
+## Schedule Types
+
+<CardGroup cols={3}>
+  <Card title="Time-based" icon="clock">
+    Run on a schedule (cron or interval)
+  </Card>
+  <Card title="Event-based" icon="bell">
+    Trigger on specific events
+  </Card>
+  <Card title="API" icon="webhook">
+    Trigger via HTTP webhook
+  </Card>
+</CardGroup>
+
+## Schedule Intervals
+
+### Predefined Intervals
+
+- `@once` - Run once at start time
+- `@hourly` - Every hour
+- `@daily` - Every day at midnight
+- `@weekly` - Every week on Sunday
+- `@monthly` - First day of every month
+- `@always_on` - Continuously running (for streaming pipelines)
+
+### Cron Expressions
+
+You can also use standard cron expressions:
+
+```
+0 */6 * * *     # Every 6 hours
+30 9 * * 1-5    # Weekdays at 9:30 AM
+0 0 1 * *       # First day of month at midnight
+```
+
+## Schedule Settings
+
+Common schedule settings:
+
+```json
+{
+  "settings": {
+    "skip_if_previous_running": true,
+    "allow_blocks_to_fail": false,
+    "landing_time_enabled": false,
+    "timeout": 3600,
+    "retry_config": {
+      "retries": 3,
+      "delay": 60,
+      "exponential_backoff": true
+    }
+  }
+}
+```
+
+<ParamField body="skip_if_previous_running" type="boolean">
+  Skip execution if previous run is still running
+</ParamField>
+
+<ParamField body="allow_blocks_to_fail" type="boolean">
+  Continue pipeline execution even if blocks fail
+</ParamField>
+
+<ParamField body="landing_time_enabled" type="boolean">
+  Enable landing time checks for data sources
+</ParamField>
+
+<ParamField body="timeout" type="integer">
+  Maximum execution time in seconds
+</ParamField>
+
+<ParamField body="retry_config" type="object">
+  Retry configuration for failed runs
+</ParamField>
+
+## Event Matchers
+
+For event-based triggers, configure event matchers:
+
+```json
+{
+  "event_matchers": [
+    {
+      "event_type": "aws.s3.object_created",
+      "pattern": {
+        "bucket": "my-data-bucket",
+        "prefix": "uploads/"
+      }
+    }
+  ]
+}
+```
+
+## Getting the API Trigger Token
+
+When you create an API trigger, a token is automatically generated. To retrieve it:
+
+```bash
+curl -X GET "http://localhost:6789/api/pipeline_schedules/46" \
+  -H "API-Key: your_api_key" \
+  -H "OAUTH-TOKEN: your_access_token"
+```
+
+The response includes the `token` field (unless `HIDE_API_TRIGGER_TOKEN` is enabled).
+
+<Warning>
+  Keep API trigger tokens secure. Anyone with the token can trigger your pipeline.
+</Warning>
+
+## Error Responses
+
+### Trigger Not Found
+
+```json
+{
+  "error": {
+    "code": 404,
+    "message": "Pipeline schedule not found"
+  }
+}
+```
+
+### Invalid Token for API Trigger
+
+```json
+{
+  "error": {
+    "code": 401,
+    "message": "Invalid token for pipeline schedule ID 46"
+  }
+}
+```
+
+### Not an API Trigger
+
+```json
+{
+  "error": {
+    "code": 401,
+    "message": "This endpoint is only supported for API trigger"
+  }
+}
+```
+
+## Best Practices
+
+1. **Use descriptive names**: Name triggers clearly to indicate their purpose
+2. **Set appropriate intervals**: Don't run pipelines more frequently than needed
+3. **Enable skip_if_previous_running**: Prevent overlapping executions
+4. **Configure retry logic**: Handle transient failures gracefully
+5. **Use variables**: Pass configuration via variables instead of hardcoding
+6. **Monitor trigger health**: Regularly check trigger execution history
+7. **Secure API tokens**: Rotate API trigger tokens periodically
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Pipeline Runs" icon="play" href="/api/rest/pipeline-runs">
+    Monitor and manage triggered pipeline runs
+  </Card>
+  <Card title="Pipelines" icon="diagram-project" href="/api/rest/pipelines">
+    Configure pipelines to trigger
+  </Card>
+</CardGroup>

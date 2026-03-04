@@ -1,0 +1,670 @@
+---
+title: "Performance Optimization"
+description: "Techniques for optimizing Mage pipeline performance and resource utilization"
+---
+
+## Overview
+
+Pipeline performance directly impacts data freshness and infrastructure costs. This guide covers optimization strategies based on Mage's architecture and resource management systems.
+
+## Execution Modes
+
+### Parallel Execution
+
+Mage's default execution mode runs blocks concurrently:
+
+```python
+# mage_ai/data_preparation/models/block/__init__.py
+async def run_blocks(root_blocks, parallel=True):
+    # Blocks execute concurrently when dependencies satisfied
+    tasks = {}
+    for block in blocks:
+        if all_upstream_blocks_completed(block):
+            tasks[block.uuid] = asyncio.create_task(
+                block.execute()
+            )
+    await asyncio.gather(*tasks.values())
+```
+
+<Tip>
+Parallel execution provides significant speedup for I/O-bound operations (API calls, database queries, file reads). Blocks without dependencies run simultaneously.
+</Tip>
+
+### Concurrency Configuration
+
+Control parallel execution limits:
+
+```yaml
+# metadata.yaml
+concurrency_config:
+  block_run_limit: 10          # Max concurrent block executions
+  
+# Per-block concurrency (for dynamic blocks)
+blocks:
+  - uuid: process_customers
+    type: transformer  
+    configuration:
+      dynamic_block_index: 0
+      max_parallel: 5          # Process 5 customers concurrently
+```
+
+<Warning>
+Setting `block_run_limit` too high can overwhelm system resources. Monitor CPU and memory usage to find optimal values. Start with 10 and adjust based on your infrastructure.
+</Warning>
+
+## Memory Optimization
+
+### Memory Manager V2
+
+Mage includes advanced memory management:
+
+```python
+# Enable in environment or metadata.yaml
+MEMORY_MANAGER_V2=true
+
+# Automatically chunks large iterables
+# mage_ai/data_preparation/variable_manager.py
+if MEMORY_MANAGER_V2 and variable_type in [
+    VariableType.DATAFRAME,
+    VariableType.POLARS_DATAFRAME,
+]:
+    # Split large dataframes into chunks
+    for idx, data_nested in enumerate(DataGenerator(data)):
+        variable_nested = add_variable(
+            pipeline_uuid,
+            block_uuid,
+            os.path.join(str(variable_uuid), str(idx)),
+            data_nested,
+        )
+```
+
+<Note>
+Memory Manager V2 automatically splits large DataFrames into manageable chunks during storage and retrieval. This prevents memory exhaustion when working with large datasets.
+</Note>
+
+### Cache Control
+
+```yaml
+# metadata.yaml
+cache_block_output_in_memory: false   # Default: false
+run_pipeline_in_one_process: false    # Default: false
+```
+
+<Warning>
+Only enable `cache_block_output_in_memory` for pipelines with small datasets (< 100MB total). This keeps all outputs in memory, reducing I/O but consuming significant RAM.
+</Warning>
+
+### Efficient Data Types
+
+```python
+@data_loader
+def load_data(*args, **kwargs):
+    """Use efficient data types to reduce memory."""
+    
+    # Pandas optimization
+    df = pd.read_csv(
+        'data.csv',
+        dtype={
+            'id': 'int32',           # Instead of int64
+            'category': 'category',  # Instead of object
+            'value': 'float32',      # Instead of float64
+        },
+        parse_dates=['timestamp'],
+        usecols=['id', 'category', 'value', 'timestamp'],  # Load only needed columns
+    )
+    
+    return df
+```
+
+<Tip>
+Using appropriate data types can reduce memory usage by 50-75%:
+- Use `category` for low-cardinality string columns
+- Use `int32` instead of `int64` when values fit
+- Use `float32` for less precision-critical numeric data
+- Load only necessary columns with `usecols`
+</Tip>
+
+### Polars for Large Datasets
+
+Consider Polars for better performance:
+
+```python
+import polars as pl
+
+@data_loader
+def load_large_dataset(*args, **kwargs):
+    """Polars provides better performance for large data."""
+    
+    # Polars uses Apache Arrow, more memory efficient
+    df = pl.read_csv(
+        'large_data.csv',
+        use_pyarrow=True,
+    )
+    
+    # Lazy evaluation for query optimization
+    result = (
+        df.lazy()
+        .filter(pl.col('status') == 'active')
+        .groupby('category')
+        .agg(pl.col('value').sum())
+        .collect()  # Execute optimized query
+    )
+    
+    return result
+```
+
+<Note>
+Mage automatically detects and handles Polars DataFrames (`VariableType.POLARS_DATAFRAME`). Polars offers 5-10x better performance than Pandas for large datasets with built-in parallel processing.
+</Note>
+
+## I/O Optimization
+
+### Batch Processing
+
+Use batch settings for efficient I/O:
+
+```python
+from mage_ai.data.tabular.models import BatchSettings
+from mage_ai.io.base import ExportWritePolicy
+
+@data_exporter  
+def export_in_batches(data, *args, **kwargs):
+    """Export large datasets efficiently."""
+    
+    # Configure batch writing
+    batch_settings = BatchSettings(
+        mode=ExportWritePolicy.APPEND,
+        size=10000,  # Rows per batch
+    )
+    
+    # Mage handles batching automatically
+    variable_manager.add_variable(
+        pipeline_uuid=kwargs['pipeline_uuid'],
+        block_uuid=kwargs['block_uuid'],
+        variable_uuid='output_0',
+        data=data,
+        write_batch_settings=batch_settings,
+    )
+```
+
+### Chunked Reading
+
+Process data in chunks to reduce memory:
+
+```python
+@transformer
+def transform_large_file(*args, **kwargs):
+    """Process large files without loading entirely into memory."""
+    
+    chunk_size = 50000
+    results = []
+    
+    # Process file in chunks
+    for chunk in pd.read_csv('large_file.csv', chunksize=chunk_size):
+        # Transform each chunk
+        transformed = apply_transformations(chunk)
+        results.append(transformed)
+        
+        # Clear chunk from memory
+        del chunk
+    
+    # Combine results
+    return pd.concat(results, ignore_index=True)
+```
+
+<Tip>
+Set chunk size based on available memory. As a rule of thumb:
+- 10,000 rows for machines with 2-4GB RAM
+- 50,000 rows for machines with 8-16GB RAM  
+- 100,000 rows for machines with 32GB+ RAM
+</Tip>
+
+### Database Query Optimization
+
+Optimize database interactions:
+
+```python
+from mage_ai.io.postgres import Postgres
+
+@data_loader
+def load_from_database(*args, **kwargs):
+    """Efficient database loading."""
+    
+    config = kwargs.get('configuration', {})
+    postgres = Postgres(**config['connection'])
+    
+    # Use query optimization techniques
+    query = """
+    SELECT 
+        id,
+        customer_id,
+        amount,
+        created_at
+    FROM transactions
+    WHERE 
+        created_at >= '{{ execution_date }}'
+        AND status = 'completed'
+    ORDER BY created_at
+    -- Use LIMIT for testing, remove in production
+    -- LIMIT 1000
+    """
+    
+    # Load with chunking for large results
+    return postgres.load(
+        query,
+        chunksize=10000,  # Fetch in chunks
+    )
+```
+
+<Note>
+**Database optimization checklist:**
+- ✅ Select only needed columns
+- ✅ Add WHERE clause to filter at source
+- ✅ Ensure WHERE columns are indexed
+- ✅ Use ORDER BY only when necessary
+- ✅ Consider partitioning for time-series data
+- ✅ Use EXPLAIN to analyze query plans
+</Note>
+
+## Variable Storage Optimization
+
+### Remote Variables Directory
+
+Store variables in cloud storage:
+
+```yaml
+# metadata.yaml
+remote_variables_dir: s3://bucket-name/mage-variables
+# or
+remote_variables_dir: gs://bucket-name/mage-variables
+```
+
+```python
+# Automatically uses S3VariableManager or GCSVariableManager
+# mage_ai/data_preparation/variable_manager.py
+
+if variables_dir.startswith(S3_PREFIX):
+    storage = S3Storage(dirpath=variables_dir)
+elif variables_dir.startswith(GCS_PREFIX):
+    storage = GCSStorage(dirpath=variables_dir)
+```
+
+<Tip>
+Using remote storage:
+- ✅ Reduces local disk usage
+- ✅ Enables sharing across instances
+- ✅ Provides durability and backup
+- ❌ Adds network latency for reads/writes
+- ❌ Increases cloud storage costs
+</Tip>
+
+### Variable Retention
+
+Automatic cleanup of old variables:
+
+```yaml
+# metadata.yaml
+variables_retention_period: 7d    # Keep variables for 7 days
+# Format: {number}{unit} where unit = d (days), h (hours), m (minutes)
+```
+
+```python
+# Automatic cleanup runs periodically
+# mage_ai/data_preparation/variable_manager.py
+def clean_variables(pipeline_uuid):
+    retention_ds = str_to_timedelta(repo_config.variables_retention_period)
+    min_partition = (datetime.utcnow() - retention_ds).strftime('%Y%m%dT%H%M%S')
+    
+    # Remove partitions older than retention period
+    for partition in execution_partitions:
+        if partition <= min_partition:
+            storage.remove_dir(pipeline_partition_vpath)
+```
+
+<Warning>
+Set `variables_retention_period` based on:
+- Debugging needs (keep longer for troubleshooting)
+- Storage costs (shorter period saves money)
+- Compliance requirements (may need long retention)
+- Re-run requirements (keep until next successful run)
+</Warning>
+
+## Caching Strategies
+
+### Pipeline and Block Caches
+
+Mage maintains multiple cache layers:
+
+```python
+# Pipeline cache for metadata
+from mage_ai.cache.pipeline import PipelineCache
+pipeline_cache = PipelineCache()
+
+# Block cache for relationships  
+from mage_ai.cache.block import BlockCache
+block_cache = await BlockCache.initialize_cache()
+
+# Variable aggregate cache for statistics
+from mage_ai.data_preparation.models.variables.cache import (
+    VariableAggregateCache
+)
+variable_cache = VariableAggregateCache()
+```
+
+<Note>
+Caches are automatically updated on pipeline/block changes. Use `VARIABLE_DATA_OUTPUT_META_CACHE=true` to enable variable metadata caching for faster UI rendering.
+</Note>
+
+### File System Cache
+
+Optimize file access patterns:
+
+```python
+@data_loader
+def load_cached_data(*args, **kwargs):
+    """Use filesystem caching for frequently accessed data."""
+    
+    cache_path = '/tmp/cached_data.parquet'
+    cache_ttl_hours = 24
+    
+    # Check cache validity
+    if os.path.exists(cache_path):
+        cache_age = time.time() - os.path.getmtime(cache_path)
+        if cache_age < cache_ttl_hours * 3600:
+            logger.info("Loading from cache")
+            return pd.read_parquet(cache_path)
+    
+    # Fetch fresh data
+    logger.info("Cache miss, fetching fresh data")
+    data = fetch_from_source()
+    
+    # Update cache
+    data.to_parquet(cache_path)
+    
+    return data
+```
+
+## Executor Optimization
+
+### Executor Types
+
+Choose appropriate executor for workload:
+
+```yaml
+# metadata.yaml
+executor_type: local_python      # Default
+# Options:
+# - local_python: Single machine
+# - k8s: Kubernetes clusters
+# - ecs: AWS ECS
+# - gcp_cloud_run: GCP Cloud Run
+# - azure_container_instance: Azure ACI
+```
+
+### Kubernetes Executor
+
+Scale blocks independently:
+
+```yaml
+# metadata.yaml
+executor_type: k8s
+executor_config:
+  namespace: mage-pipelines
+  service_account_name: mage-executor
+  
+blocks:
+  - uuid: heavy_transform
+    type: transformer
+    executor_config:
+      resource_limits:
+        cpu: "4"
+        memory: "8Gi"
+      resource_requests:
+        cpu: "2"  
+        memory: "4Gi"
+```
+
+<Tip>
+K8s executor benefits:
+- ✅ Scale blocks independently
+- ✅ Isolate resource-intensive operations
+- ✅ Handle failures gracefully
+- ✅ Use spot instances for cost savings
+</Tip>
+
+## Query Performance
+
+### SQL Block Optimization
+
+```sql
+-- Use appropriate indexes
+CREATE INDEX idx_transactions_date ON transactions(created_at);
+
+-- Partition large tables
+CREATE TABLE transactions_partitioned (
+    id BIGINT,
+    created_at TIMESTAMP,
+    amount DECIMAL
+) PARTITION BY RANGE (created_at);
+
+-- Use materialized views for complex aggregations  
+CREATE MATERIALIZED VIEW daily_metrics AS
+SELECT 
+    DATE(created_at) as date,
+    COUNT(*) as transaction_count,
+    SUM(amount) as total_amount
+FROM transactions
+GROUP BY DATE(created_at);
+```
+
+### Database Connection Pooling
+
+```python
+from mage_ai.io.postgres import Postgres
+
+@data_loader
+def load_with_pooling(*args, **kwargs):
+    """Use connection pooling for efficiency."""
+    
+    config = {
+        'host': 'db.example.com',
+        'database': 'analytics',
+        'user': 'mage',
+        'password': 'secret',
+        # Connection pooling settings
+        'connect_timeout': 10,
+        'options': '-c statement_timeout=300000',  # 5 minute query timeout
+    }
+    
+    postgres = Postgres(**config)
+    return postgres.load(query)
+```
+
+## Spark Integration
+
+### Spark Configuration
+
+Optimize Spark settings:
+
+```yaml
+# metadata.yaml
+spark_config:
+  # Spark master
+  master: "spark://spark-master:7077"
+  # or for local mode
+  master: "local[*]"
+  
+  # Application settings
+  app_name: "mage_pipeline"
+  spark_jars: "/path/to/jars/*"
+  
+  # Executor settings
+  executor_memory: "4g"
+  driver_memory: "2g"
+  executor_cores: 2
+  
+  # Performance tuning
+  spark.sql.shuffle.partitions: 200
+  spark.default.parallelism: 100
+  spark.sql.adaptive.enabled: true
+```
+
+### Spark Block Optimization
+
+```python
+from pyspark.sql import SparkSession
+
+@data_loader
+def load_with_spark(*args, **kwargs):
+    """Use Spark for large-scale processing."""
+    
+    spark = kwargs.get('spark')
+    
+    # Read efficiently
+    df = spark.read.parquet(
+        's3://bucket/large-dataset/',
+        # Optimize partition reading
+        mergeSchema=False,
+        pathGlobFilter='*.parquet',
+    )
+    
+    # Cache frequently accessed data
+    df.cache()
+    
+    # Optimize joins
+    result = df.join(
+        other_df,
+        on='key',
+        how='inner',
+    ).repartition(100)  # Control output partitions
+    
+    return result
+```
+
+<Note>
+When using Spark:
+- Set `spark.sql.adaptive.enabled=true` for automatic optimization
+- Use `repartition()` to control parallelism
+- Cache intermediate results accessed multiple times
+- Prefer Parquet over CSV for better performance
+- Monitor Spark UI for optimization opportunities
+</Note>
+
+## Monitoring and Profiling
+
+### Resource Tracking
+
+Mage automatically tracks resource usage:
+
+```python
+# Automatic memory tracking
+# mage_ai/system/memory/wrappers.py
+@execute_with_memory_tracking
+def transform(data):
+    # Memory usage automatically recorded
+    return processed_data
+
+# Access resource usage
+block.resource_usage  # Contains memory and timing data
+```
+
+### Performance Metrics
+
+Monitor key metrics:
+
+```python
+@callback
+def track_performance(*args, **kwargs):
+    """Send performance metrics to monitoring system."""
+    
+    execution_time = kwargs.get('execution_time')
+    block_uuid = kwargs.get('block_uuid')
+    
+    metrics = {
+        'execution_time_seconds': execution_time,
+        'block': block_uuid,
+        'pipeline': kwargs['pipeline_uuid'],
+    }
+    
+    # Get resource usage if available  
+    if hasattr(kwargs.get('block'), 'resource_usage'):
+        usage = kwargs['block'].resource_usage
+        metrics['memory_mb'] = usage.memory_usage_mb
+    
+    send_to_monitoring(metrics)
+```
+
+### Profiling Blocks
+
+Identify bottlenecks:
+
+```python
+import cProfile
+import pstats
+from io import StringIO
+
+@transformer
+def transform_with_profiling(data, *args, **kwargs):
+    """Profile block execution."""
+    
+    logger = kwargs.get('logger')
+    
+    # Enable profiling
+    profiler = cProfile.Profile()
+    profiler.enable()
+    
+    try:
+        result = expensive_transformation(data)
+    finally:
+        profiler.disable()
+        
+        # Log profiling results
+        s = StringIO()
+        stats = pstats.Stats(profiler, stream=s).sort_stats('cumulative')
+        stats.print_stats(20)  # Top 20 functions
+        logger.info(f"Profiling results:\n{s.getvalue()}")
+    
+    return result
+```
+
+## Best Practices Summary
+
+<Accordion title="Performance Optimization Checklist">
+
+**Memory:**
+- ✅ Enable MEMORY_MANAGER_V2 for large datasets
+- ✅ Use appropriate data types (category, int32, float32)
+- ✅ Consider Polars for better memory efficiency
+- ✅ Process large files in chunks
+- ✅ Clear intermediate variables with `del`
+- ❌ Avoid `cache_block_output_in_memory` for large pipelines
+
+**I/O:**
+- ✅ Use batch settings for exports
+- ✅ Implement chunked reading for large files  
+- ✅ Select only needed columns in queries
+- ✅ Use remote storage for variable sharing
+- ✅ Set variables_retention_period appropriately
+- ✅ Prefer Parquet over CSV
+
+**Execution:**
+- ✅ Leverage parallel execution (default)
+- ✅ Set appropriate block_run_limit
+- ✅ Use K8s executor for scale
+- ✅ Configure per-block resource limits
+- ✅ Enable Spark for large-scale processing
+
+**Database:**
+- ✅ Ensure WHERE columns are indexed
+- ✅ Use connection pooling
+- ✅ Set query timeouts
+- ✅ Consider materialized views
+- ✅ Partition large tables
+
+**Monitoring:**
+- ✅ Track resource usage metrics
+- ✅ Profile expensive blocks
+- ✅ Monitor execution times
+- ✅ Set up performance alerts
+
+</Accordion>

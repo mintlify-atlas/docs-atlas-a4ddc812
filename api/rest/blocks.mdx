@@ -1,0 +1,640 @@
+---
+title: "Block Endpoints"
+description: "REST API endpoints for managing blocks in Mage pipelines"
+---
+
+## Overview
+
+Block endpoints allow you to create, read, update, and delete blocks within pipelines.
+
+## Base URL
+
+```
+http://localhost:6789/api/pipelines/{pipeline_uuid}/blocks
+```
+
+## List Blocks
+
+Retrieve all blocks in a pipeline.
+
+```http
+GET /api/pipelines/{pipeline_uuid}/blocks
+```
+
+### Path Parameters
+
+<ParamField path="pipeline_uuid" type="string" required>
+  The unique identifier of the pipeline
+</ParamField>
+
+### Query Parameters
+
+<ParamField query="block_uuid[]" type="string">
+  Filter by specific block UUIDs (comma-separated)
+</ParamField>
+
+<ParamField query="_limit" type="integer">
+  Maximum number of blocks to return
+</ParamField>
+
+<ParamField query="_offset" type="integer">
+  Number of blocks to skip (for pagination)
+</ParamField>
+
+### Request Example
+
+<CodeGroup>
+
+```bash cURL
+curl -X GET "http://localhost:6789/api/pipelines/example_pipeline/blocks" \
+  -H "API-Key: your_api_key" \
+  -H "OAUTH-TOKEN: your_access_token"
+```
+
+```python Python
+import requests
+
+url = "http://localhost:6789/api/pipelines/example_pipeline/blocks"
+headers = {
+    "API-Key": "your_api_key",
+    "OAUTH-TOKEN": "your_access_token"
+}
+
+response = requests.get(url, headers=headers)
+blocks = response.json()
+```
+
+```javascript JavaScript
+const response = await fetch(
+  'http://localhost:6789/api/pipelines/example_pipeline/blocks',
+  {
+    headers: {
+      'API-Key': 'your_api_key',
+      'OAUTH-TOKEN': 'your_access_token'
+    }
+  }
+);
+const blocks = await response.json();
+```
+
+</CodeGroup>
+
+### Response
+
+<ResponseField name="blocks" type="array">
+  Array of block objects
+  
+  <ResponseField name="uuid" type="string">
+    Unique identifier for the block
+  </ResponseField>
+  
+  <ResponseField name="name" type="string">
+    Display name of the block
+  </ResponseField>
+  
+  <ResponseField name="type" type="string">
+    Block type: `data_loader`, `transformer`, `data_exporter`, `sensor`, `custom`, `dbt`, `callback`
+  </ResponseField>
+  
+  <ResponseField name="language" type="string">
+    Programming language: `python`, `sql`, `r`, `yaml`
+  </ResponseField>
+  
+  <ResponseField name="content" type="string">
+    Block code content
+  </ResponseField>
+  
+  <ResponseField name="upstream_blocks" type="array">
+    Array of upstream block UUIDs
+  </ResponseField>
+  
+  <ResponseField name="downstream_blocks" type="array">
+    Array of downstream block UUIDs
+  </ResponseField>
+  
+  <ResponseField name="configuration" type="object">
+    Block-specific configuration
+  </ResponseField>
+  
+  <ResponseField name="status" type="string">
+    Execution status: `not_executed`, `executed`, `failed`, `updated`
+  </ResponseField>
+</ResponseField>
+
+```json Example Response
+{
+  "blocks": [
+    {
+      "uuid": "load_data",
+      "name": "Load data",
+      "type": "data_loader",
+      "language": "python",
+      "upstream_blocks": [],
+      "downstream_blocks": ["transform_data"],
+      "status": "executed",
+      "configuration": {
+        "data_provider": "postgres"
+      }
+    },
+    {
+      "uuid": "transform_data",
+      "name": "Transform data",
+      "type": "transformer",
+      "language": "python",
+      "upstream_blocks": ["load_data"],
+      "downstream_blocks": ["export_data"],
+      "status": "executed"
+    }
+  ]
+}
+```
+
+## Get Block
+
+Retrieve details for a specific block.
+
+```http
+GET /api/pipelines/{pipeline_uuid}/blocks/{block_uuid}
+```
+
+### Path Parameters
+
+<ParamField path="pipeline_uuid" type="string" required>
+  The unique identifier of the pipeline
+</ParamField>
+
+<ParamField path="block_uuid" type="string" required>
+  The unique identifier of the block (URL-encoded if contains special characters)
+</ParamField>
+
+### Query Parameters
+
+<ParamField query="extension_uuid" type="string">
+  Extension UUID if the block is part of an extension
+</ParamField>
+
+<ParamField query="block_type" type="string">
+  Block type to filter by
+</ParamField>
+
+<ParamField query="file_path" type="string">
+  Alternative: Get block by file path instead of UUID
+</ParamField>
+
+### Request Example
+
+<CodeGroup>
+
+```bash cURL
+curl -X GET "http://localhost:6789/api/pipelines/example_pipeline/blocks/load_data" \
+  -H "API-Key: your_api_key" \
+  -H "OAUTH-TOKEN: your_access_token"
+```
+
+```python Python
+import requests
+
+url = "http://localhost:6789/api/pipelines/example_pipeline/blocks/load_data"
+headers = {
+    "API-Key": "your_api_key",
+    "OAUTH-TOKEN": "your_access_token"
+}
+
+response = requests.get(url, headers=headers)
+block = response.json()
+```
+
+</CodeGroup>
+
+### Response
+
+```json
+{
+  "block": {
+    "uuid": "load_data",
+    "name": "Load data",
+    "type": "data_loader",
+    "language": "python",
+    "content": "@data_loader\ndef load_data(*args, **kwargs):\n    return [1, 2, 3]",
+    "upstream_blocks": [],
+    "downstream_blocks": ["transform_data"],
+    "status": "executed",
+    "configuration": {},
+    "outputs": [
+      {
+        "sample_data": [1, 2, 3],
+        "shape": [3]
+      }
+    ]
+  }
+}
+```
+
+## Create Block
+
+Create a new block in a pipeline.
+
+```http
+POST /api/pipelines/{pipeline_uuid}/blocks
+```
+
+### Path Parameters
+
+<ParamField path="pipeline_uuid" type="string" required>
+  The unique identifier of the pipeline
+</ParamField>
+
+### Request Body
+
+<ParamField body="uuid" type="string">
+  Block UUID (will be generated from name if not provided)
+</ParamField>
+
+<ParamField body="name" type="string" required>
+  Name of the block
+</ParamField>
+
+<ParamField body="type" type="string" required>
+  Block type
+  
+  Options: `data_loader`, `transformer`, `data_exporter`, `sensor`, `custom`, `dbt`, `callback`
+</ParamField>
+
+<ParamField body="language" type="string" required>
+  Programming language
+  
+  Options: `python`, `sql`, `r`, `yaml`
+</ParamField>
+
+<ParamField body="content" type="string">
+  Initial block code content
+</ParamField>
+
+<ParamField body="upstream_blocks" type="array">
+  Array of upstream block UUIDs
+</ParamField>
+
+<ParamField body="downstream_blocks" type="array">
+  Array of downstream block UUIDs
+</ParamField>
+
+<ParamField body="configuration" type="object">
+  Block configuration object
+</ParamField>
+
+<ParamField body="color" type="string">
+  Block color in UI (hex code)
+</ParamField>
+
+<ParamField body="priority" type="integer">
+  Execution priority
+</ParamField>
+
+<ParamField body="replicated_block" type="string">
+  UUID of block to replicate
+</ParamField>
+
+<ParamField body="require_unique_name" type="boolean">
+  Enforce unique block name (default: false)
+</ParamField>
+
+### Request Example
+
+<CodeGroup>
+
+```bash cURL
+curl -X POST "http://localhost:6789/api/pipelines/example_pipeline/blocks" \
+  -H "API-Key: your_api_key" \
+  -H "OAUTH-TOKEN: your_access_token" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "block": {
+      "name": "new_transformer",
+      "type": "transformer",
+      "language": "python",
+      "upstream_blocks": ["load_data"],
+      "content": "@transformer\ndef transform(data, *args, **kwargs):\n    return data"
+    }
+  }'
+```
+
+```python Python
+import requests
+
+url = "http://localhost:6789/api/pipelines/example_pipeline/blocks"
+headers = {
+    "API-Key": "your_api_key",
+    "OAUTH-TOKEN": "your_access_token",
+    "Content-Type": "application/json"
+}
+data = {
+    "block": {
+        "name": "new_transformer",
+        "type": "transformer",
+        "language": "python",
+        "upstream_blocks": ["load_data"],
+        "content": "@transformer\ndef transform(data, *args, **kwargs):\n    return data"
+    }
+}
+
+response = requests.post(url, headers=headers, json=data)
+block = response.json()
+```
+
+</CodeGroup>
+
+### Response
+
+```json
+{
+  "block": {
+    "uuid": "new_transformer",
+    "name": "new_transformer",
+    "type": "transformer",
+    "language": "python",
+    "upstream_blocks": ["load_data"],
+    "downstream_blocks": [],
+    "status": "not_executed",
+    "created_at": "2024-03-04T16:00:00Z"
+  }
+}
+```
+
+## Update Block
+
+Update an existing block.
+
+```http
+PUT /api/pipelines/{pipeline_uuid}/blocks/{block_uuid}
+```
+
+### Path Parameters
+
+<ParamField path="pipeline_uuid" type="string" required>
+  The unique identifier of the pipeline
+</ParamField>
+
+<ParamField path="block_uuid" type="string" required>
+  The unique identifier of the block
+</ParamField>
+
+### Request Body
+
+<ParamField body="content" type="string">
+  Updated block code content
+</ParamField>
+
+<ParamField body="name" type="string">
+  Updated block name
+</ParamField>
+
+<ParamField body="upstream_blocks" type="array">
+  Updated array of upstream block UUIDs
+</ParamField>
+
+<ParamField body="downstream_blocks" type="array">
+  Updated array of downstream block UUIDs
+</ParamField>
+
+<ParamField body="configuration" type="object">
+  Updated configuration
+</ParamField>
+
+<ParamField body="color" type="string">
+  Updated block color
+</ParamField>
+
+### Request Example
+
+<CodeGroup>
+
+```bash cURL
+curl -X PUT "http://localhost:6789/api/pipelines/example_pipeline/blocks/new_transformer" \
+  -H "API-Key: your_api_key" \
+  -H "OAUTH-TOKEN: your_access_token" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "block": {
+      "content": "@transformer\ndef transform(data, *args, **kwargs):\n    # Updated logic\n    return data * 2"
+    }
+  }'
+```
+
+```python Python
+import requests
+
+url = "http://localhost:6789/api/pipelines/example_pipeline/blocks/new_transformer"
+headers = {
+    "API-Key": "your_api_key",
+    "OAUTH-TOKEN": "your_access_token",
+    "Content-Type": "application/json"
+}
+data = {
+    "block": {
+        "content": "@transformer\ndef transform(data, *args, **kwargs):\n    # Updated logic\n    return data * 2"
+    }
+}
+
+response = requests.put(url, headers=headers, json=data)
+block = response.json()
+```
+
+</CodeGroup>
+
+### Response
+
+```json
+{
+  "block": {
+    "uuid": "new_transformer",
+    "name": "new_transformer",
+    "type": "transformer",
+    "language": "python",
+    "status": "updated",
+    "updated_at": "2024-03-04T17:00:00Z"
+  }
+}
+```
+
+## Delete Block
+
+Delete a block from a pipeline.
+
+```http
+DELETE /api/pipelines/{pipeline_uuid}/blocks/{block_uuid}
+```
+
+### Path Parameters
+
+<ParamField path="pipeline_uuid" type="string" required>
+  The unique identifier of the pipeline
+</ParamField>
+
+<ParamField path="block_uuid" type="string" required>
+  The unique identifier of the block to delete
+</ParamField>
+
+### Request Example
+
+<CodeGroup>
+
+```bash cURL
+curl -X DELETE "http://localhost:6789/api/pipelines/example_pipeline/blocks/new_transformer" \
+  -H "API-Key: your_api_key" \
+  -H "OAUTH-TOKEN: your_access_token"
+```
+
+```python Python
+import requests
+
+url = "http://localhost:6789/api/pipelines/example_pipeline/blocks/new_transformer"
+headers = {
+    "API-Key": "your_api_key",
+    "OAUTH-TOKEN": "your_access_token"
+}
+
+response = requests.delete(url, headers=headers)
+```
+
+</CodeGroup>
+
+### Response
+
+```json
+{
+  "block": {
+    "uuid": "new_transformer",
+    "deleted": true
+  }
+}
+```
+
+## Block Types
+
+<CardGroup cols={3}>
+  <Card title="Data Loader" icon="download">
+    Load data from sources
+  </Card>
+  <Card title="Transformer" icon="wand-magic-sparkles">
+    Transform and clean data
+  </Card>
+  <Card title="Data Exporter" icon="upload">
+    Export data to destinations
+  </Card>
+  <Card title="Sensor" icon="radar">
+    Wait for conditions
+  </Card>
+  <Card title="DBT" icon="database">
+    Run dbt models
+  </Card>
+  <Card title="Custom" icon="code">
+    Custom logic blocks
+  </Card>
+</CardGroup>
+
+## Block Languages
+
+- **Python**: Standard Python code
+- **SQL**: SQL queries
+- **R**: R programming language
+- **YAML**: Configuration-based blocks
+
+## Block Templates
+
+### Using Built-in Templates
+
+Create blocks from Mage templates:
+
+```json
+{
+  "block": {
+    "name": "api_loader",
+    "type": "data_loader",
+    "language": "python",
+    "config": {
+      "template_path": "data_loaders/api.py"
+    }
+  }
+}
+```
+
+### Using Custom Templates
+
+Create blocks from custom templates:
+
+```json
+{
+  "block": {
+    "name": "custom_loader",
+    "type": "data_loader",
+    "language": "python",
+    "config": {
+      "custom_template_uuid": "my_custom_template"
+    }
+  }
+}
+```
+
+## Block Configuration Options
+
+Common configuration fields:
+
+```json
+{
+  "configuration": {
+    "data_provider": "postgres",
+    "data_provider_profile": "default",
+    "export_write_policy": "append",
+    "use_raw_sql": false,
+    "file_source": {
+      "path": "data/input.csv"
+    }
+  }
+}
+```
+
+## Error Responses
+
+### Block Not Found
+
+```json
+{
+  "error": {
+    "code": 404,
+    "message": "Block load_data does not exist in pipeline example_pipeline"
+  }
+}
+```
+
+### Invalid Block Type
+
+```json
+{
+  "error": {
+    "code": 400,
+    "message": "Invalid block type: invalid_type"
+  }
+}
+```
+
+### Block Name Conflict
+
+```json
+{
+  "error": {
+    "code": 400,
+    "message": "Block with name 'load_data' already exists"
+  }
+}
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Pipeline Runs" icon="play" href="/api/rest/pipeline-runs">
+    Execute blocks via pipeline runs
+  </Card>
+  <Card title="Block Outputs" icon="chart-line">
+    View block execution outputs
+  </Card>
+</CardGroup>

@@ -1,0 +1,548 @@
+---
+title: 'Dynamic Blocks'
+description: 'Create dynamic blocks for parallel execution and data partitioning'
+icon: 'layer-group'
+---
+
+## Overview
+
+**Dynamic blocks** in Mage allow you to create multiple instances of a block dynamically at runtime, enabling parallel processing of data partitions or batch operations. This is particularly useful for:
+
+- Processing large datasets in parallel chunks
+- Handling multiple files or data sources simultaneously
+- Running the same transformation on different data partitions
+- Fan-out and fan-in patterns
+
+## Dynamic Block Types
+
+### Parent Dynamic Blocks
+
+A parent dynamic block generates metadata that determines how many child blocks to create:
+
+```python
+from mage_ai.data_preparation.decorators import data_loader
+
+@data_loader
+def load_partitions(*args, **kwargs):
+    """
+    Return a list of items to process in parallel.
+    Each item will create a separate block execution.
+    """
+    # Return list of dates to process
+    dates = [
+        '2024-01-01',
+        '2024-01-02', 
+        '2024-01-03',
+        '2024-01-04',
+        '2024-01-05'
+    ]
+    
+    return dates
+```
+
+Mage will automatically create child block instances for each item in the returned list.
+
+### Dynamic Child Blocks
+
+Child blocks process individual items from the parent:
+
+```python
+@transformer
+def process_partition(data, *args, **kwargs):
+    """
+    Process a single partition.
+    'data' contains one item from the parent block's output.
+    """
+    # Get the current partition index
+    dynamic_block_index = kwargs.get('dynamic_block_index', 0)
+    
+    # Get the partition value
+    date = data  # Single date from parent list
+    
+    print(f'Processing partition {dynamic_block_index} for date: {date}')
+    
+    # Load and process data for this date
+    df = load_data_for_date(date)
+    return df
+```
+
+## Configuring Dynamic Blocks
+
+### Enable Dynamic Execution
+
+Configure a block for dynamic behavior in its configuration:
+
+```python
+from mage_ai.data_preparation.models.block import Block
+
+# Create dynamic parent block
+parent_block = Block.create(
+    name='load_dates',
+    block_type='data_loader',
+    pipeline=pipeline,
+    configuration={
+        'dynamic': True,  # Enable dynamic behavior
+    }
+)
+
+# Child blocks automatically process each item
+child_block = Block.create(
+    name='process_date',
+    block_type='transformer',
+    pipeline=pipeline,
+    upstream_block_uuids=['load_dates']
+)
+```
+
+### Block Configuration
+
+```yaml
+# In metadata.yaml
+blocks:
+- uuid: load_dates
+  type: data_loader
+  configuration:
+    dynamic: true
+    # Optionally reduce output after children complete
+    reduce_output: false
+  
+- uuid: process_date
+  type: transformer
+  upstream_blocks:
+  - load_dates
+```
+
+## Dynamic Block Patterns
+
+### Fan-Out Pattern
+
+Create multiple parallel executions:
+
+```python
+# Parent block: Generate list of items
+@data_loader
+def list_files(*args, **kwargs):
+    """
+    List all files to process.
+    """
+    import boto3
+    
+    s3 = boto3.client('s3')
+    response = s3.list_objects_v2(
+        Bucket='my-bucket',
+        Prefix='data/2024-01/'
+    )
+    
+    # Return list of file keys
+    files = [obj['Key'] for obj in response.get('Contents', [])]
+    return files
+
+# Child block: Process each file in parallel
+@transformer
+def process_file(file_key, *args, **kwargs):
+    """
+    Process a single file.
+    """
+    import boto3
+    import pandas as pd
+    from io import BytesIO
+    
+    s3 = boto3.client('s3')
+    
+    # Download file
+    obj = s3.get_object(Bucket='my-bucket', Key=file_key)
+    df = pd.read_csv(BytesIO(obj['Body'].read()))
+    
+    # Process data
+    df = df.dropna()
+    df['processed_at'] = pd.Timestamp.now()
+    
+    return df
+```
+
+### Fan-In Pattern (Reduce)
+
+Aggregate results from dynamic children:
+
+```python
+# Parent block with reduce enabled
+@data_loader
+def generate_batches(*args, **kwargs):
+    """
+    Generate batch IDs to process.
+    """
+    return list(range(0, 1000, 100))  # [0, 100, 200, ..., 900]
+
+# Child block: Process each batch
+@transformer
+def process_batch(batch_id, *args, **kwargs):
+    """
+    Process a batch of records.
+    """
+    # Process records in this batch range
+    records = fetch_records(batch_id, batch_id + 100)
+    return records
+
+# Reduce block: Combine all results
+@transformer
+def combine_results(*args, **kwargs):
+    """
+    Combine results from all dynamic children.
+    args contains outputs from all child blocks.
+    """
+    import pandas as pd
+    
+    # Concatenate all dataframes
+    all_results = pd.concat(args, ignore_index=True)
+    
+    print(f'Combined {len(args)} partitions with {len(all_results)} total rows')
+    
+    return all_results
+```
+
+### Configuration for Reduce
+
+```yaml
+blocks:
+- uuid: generate_batches
+  type: data_loader
+  configuration:
+    dynamic: true
+    reduce_output: true  # Enable reduce pattern
+    
+- uuid: process_batch
+  type: transformer
+  upstream_blocks:
+  - generate_batches
+  
+- uuid: combine_results
+  type: transformer
+  upstream_blocks:
+  - process_batch  # Receives all child outputs
+```
+
+## Complex Dynamic Patterns
+
+### Nested Dynamic Blocks
+
+Create multiple levels of parallelization:
+
+```python
+# Level 1: Generate regions
+@data_loader
+def list_regions(*args, **kwargs):
+    return ['us-east-1', 'us-west-2', 'eu-west-1']
+
+# Level 2: Generate dates for each region
+@transformer
+def list_dates_for_region(region, *args, **kwargs):
+    from datetime import datetime, timedelta
+    
+    dates = []
+    start = datetime(2024, 1, 1)
+    for i in range(7):
+        dates.append((start + timedelta(days=i)).strftime('%Y-%m-%d'))
+    
+    return dates
+
+# Level 3: Process each region-date combination
+@transformer
+def process_region_date(date, region, *args, **kwargs):
+    """
+    Process data for specific region and date.
+    """
+    # Access parent dynamic values
+    dynamic_block_indexes = kwargs.get('dynamic_block_indexes', {})
+    region_index = dynamic_block_indexes.get('list_regions', 0)
+    
+    # Get the region from the grandparent block
+    # Access via kwargs or through parent metadata
+    
+    print(f'Processing {region} for {date}')
+    
+    # Load and process data
+    return process_data(region, date)
+```
+
+### Dynamic with Metadata
+
+Pass additional metadata along with dynamic values:
+
+```python
+@data_loader
+def generate_tasks(*args, **kwargs):
+    """
+    Return list of tasks with metadata.
+    """
+    tasks = [
+        {'id': 1, 'type': 'full', 'priority': 'high'},
+        {'id': 2, 'type': 'incremental', 'priority': 'medium'},
+        {'id': 3, 'type': 'full', 'priority': 'low'},
+    ]
+    return tasks
+
+@transformer
+def process_task(task, *args, **kwargs):
+    """
+    Process task based on metadata.
+    """
+    task_id = task['id']
+    task_type = task['type']
+    priority = task['priority']
+    
+    print(f'Processing task {task_id} (type: {task_type}, priority: {priority})')
+    
+    if task_type == 'full':
+        return run_full_sync(task_id)
+    else:
+        return run_incremental_sync(task_id)
+```
+
+## Dynamic Block Variables
+
+### Accessing Dynamic Context
+
+```python
+@transformer
+def process_with_context(data, *args, **kwargs):
+    """
+    Access dynamic execution context.
+    """
+    # Current index in parent's output list
+    dynamic_block_index = kwargs.get('dynamic_block_index')
+    
+    # UUID of the dynamic child block
+    dynamic_block_uuid = kwargs.get('dynamic_block_uuid')
+    
+    # Dictionary of indexes for nested dynamic blocks
+    dynamic_block_indexes = kwargs.get('dynamic_block_indexes', {})
+    
+    # List of dynamic upstream block UUIDs
+    dynamic_upstream_block_uuids = kwargs.get('dynamic_upstream_block_uuids', [])
+    
+    print(f'Processing index {dynamic_block_index}')
+    print(f'Block UUID: {dynamic_block_uuid}')
+    
+    return process_data(data, index=dynamic_block_index)
+```
+
+### Variable Storage
+
+Dynamic block outputs are stored with their index:
+
+```
+.variables/
+  pipelines/
+    my_pipeline/
+      partition/
+        parent_block/
+          output_0              # List of dynamic items
+        child_block:0/          # Child for index 0
+          output_0
+        child_block:1/          # Child for index 1
+          output_0
+        child_block:2/          # Child for index 2
+          output_0
+```
+
+## Dynamic Block Execution
+
+### Block Run Creation
+
+When a dynamic parent block executes, Mage creates child block runs:
+
+```python
+from mage_ai.orchestration.db.models.schedules import BlockRun
+
+# Parent block run
+parent_block_run = BlockRun.query.filter_by(
+    pipeline_run_id=pipeline_run.id,
+    block_uuid='parent_block'
+).first()
+
+# Child block runs are created dynamically
+child_block_runs = BlockRun.query.filter(
+    BlockRun.pipeline_run_id == pipeline_run.id,
+    BlockRun.block_uuid.like('parent_block:%')
+).all()
+
+for child in child_block_runs:
+    print(f'Child: {child.block_uuid}, Status: {child.status}')
+    # Metrics contain dynamic information
+    print(f'Index: {child.metrics.get("dynamic_block_index")}')
+```
+
+### Execution Flow
+
+1. **Parent Executes**: Returns list of items
+2. **Children Created**: One child block run per item
+3. **Children Execute**: Process items in parallel
+4. **Reduce (Optional)**: Downstream block combines results
+
+## Performance Optimization
+
+### Batch Size Control
+
+Limit the number of parallel executions:
+
+```python
+@data_loader
+def generate_batches(*args, **kwargs):
+    """
+    Generate batches of appropriate size.
+    """
+    total_records = 10000
+    batch_size = 100  # Process 100 records per child
+    
+    batches = []
+    for start in range(0, total_records, batch_size):
+        batches.append({
+            'start': start,
+            'end': start + batch_size
+        })
+    
+    # This creates 100 child blocks
+    return batches
+```
+
+### Concurrency Limits
+
+Control how many child blocks run simultaneously:
+
+```yaml
+# In pipeline metadata.yaml
+concurrency_config:
+  block_run_limit: 10  # Max 10 blocks running at once
+```
+
+### Resource Allocation
+
+Assign resources to child blocks:
+
+```yaml
+blocks:
+- uuid: process_partition
+  type: transformer
+  executor_type: k8s
+  executor_config:
+    container_config:
+      requests:
+        cpu: 500m
+        memory: 1Gi
+```
+
+## Data Integration with Dynamic Blocks
+
+Dynamic blocks work seamlessly with data integration pipelines:
+
+```python
+# Source block with dynamic streams
+@data_integration_source
+def load_from_postgres(*args, **kwargs):
+    return {
+        'data_integration_uuid': 'postgres',
+        'selected_streams': ['users', 'orders', 'products'],  # Multiple streams
+        'config': {...}
+    }
+
+# Destination processes each stream dynamically
+@data_integration_destination
+def export_to_snowflake(data, *args, **kwargs):
+    stream = kwargs.get('stream')  # Current stream being processed
+    
+    return {
+        'data_integration_uuid': 'snowflake',
+        'config': {...}
+    }
+```
+
+## Testing Dynamic Blocks
+
+Test dynamic blocks with sample data:
+
+```python
+@data_loader
+def generate_test_data(*args, **kwargs):
+    # Return small test dataset
+    return ['test1', 'test2', 'test3']
+
+@transformer
+def process_item(item, *args, **kwargs):
+    # Process logic
+    return {'item': item, 'processed': True}
+
+@test
+def test_output(output, *args):
+    """
+    Test single child output.
+    """
+    assert 'item' in output
+    assert 'processed' in output
+    assert output['processed'] is True
+```
+
+## Best Practices
+
+<Tip>
+  **Appropriate Batch Sizes**
+  
+  Balance between parallelization and overhead. Too many small batches create overhead; too few large batches don't parallelize well.
+</Tip>
+
+<Note>
+  **Memory Management**
+  
+  Be mindful of memory usage when processing many partitions simultaneously. Use concurrency limits if needed.
+</Note>
+
+<Warning>
+  **Reduce Pattern**
+  
+  When using reduce pattern, ensure the downstream block can handle combining all child outputs efficiently.
+</Warning>
+
+<Tip>
+  **Error Handling**
+  
+  Child block failures are independent. Use retry configuration to handle transient failures in individual partitions.
+</Tip>
+
+## Troubleshooting
+
+### Debug Dynamic Execution
+
+```python
+@transformer
+def debug_dynamic_block(data, *args, **kwargs):
+    """
+    Debug dynamic block execution.
+    """
+    import json
+    
+    print('=== Dynamic Block Debug Info ===')
+    print(f'Data: {data}')
+    print(f'Dynamic block index: {kwargs.get("dynamic_block_index")}')
+    print(f'Dynamic block UUID: {kwargs.get("dynamic_block_uuid")}')
+    print(f'Dynamic block indexes: {json.dumps(kwargs.get("dynamic_block_indexes", {}))}')
+    print(f'Dynamic upstream blocks: {kwargs.get("dynamic_upstream_block_uuids", [])}')
+    print('===============================')
+    
+    return data
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Execution" icon="play" href="/pipelines/execution">
+    Learn about execution modes and executors
+  </Card>
+  <Card title="Scheduling" icon="clock" href="/pipelines/scheduling">
+    Schedule dynamic pipelines
+  </Card>
+  <Card title="Optimization" icon="gauge-high" href="/guides/best-practices/performance">
+    Optimize dynamic block performance
+  </Card>
+  <Card title="Monitoring" icon="chart-line" href="/orchestration/monitoring">
+    Monitor dynamic block execution
+  </Card>
+</CardGroup>

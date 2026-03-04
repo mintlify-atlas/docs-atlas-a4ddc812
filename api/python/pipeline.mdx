@@ -1,0 +1,507 @@
+---
+title: 'Pipeline'
+description: 'Create and manage data pipelines in Mage'
+---
+
+## Overview
+
+The `Pipeline` class represents a data pipeline in Mage. It manages the execution flow of blocks, handles dependencies, and stores pipeline configuration.
+
+## Constructor
+
+```python
+Pipeline(
+    uuid: str,
+    repo_path: str = None,
+    config: dict = None,
+    repo_config: RepoConfig = None,
+    catalog: dict = None,
+    context_data: dict = None,
+    use_repo_path: bool = False,
+    description: str = None,
+    tags: list[str] = None,
+    execution_framework: str = None,
+)
+```
+
+<ParamField path="uuid" type="str" required>
+  Unique identifier for the pipeline
+</ParamField>
+
+<ParamField path="repo_path" type="str">
+  Path to the repository containing the pipeline. Defaults to current repository path.
+</ParamField>
+
+<ParamField path="config" type="dict">
+  Pipeline configuration dictionary. If None, loads from metadata.yaml file.
+</ParamField>
+
+<ParamField path="repo_config" type="RepoConfig">
+  Repository configuration object
+</ParamField>
+
+<ParamField path="catalog" type="dict">
+  Data integration catalog configuration
+</ParamField>
+
+<ParamField path="context_data" type="dict">
+  Additional context data for multi-project setups
+</ParamField>
+
+<ParamField path="use_repo_path" type="bool" default="False">
+  Whether to use the provided repo_path explicitly
+</ParamField>
+
+<ParamField path="description" type="str">
+  Pipeline description
+</ParamField>
+
+<ParamField path="tags" type="list[str]">
+  List of tags associated with the pipeline
+</ParamField>
+
+<ParamField path="execution_framework" type="str">
+  Execution framework identifier (e.g., 'argo', 'prefect')
+</ParamField>
+
+## Class Methods
+
+### create
+
+Creates a new pipeline with the specified configuration.
+
+```python
+@classmethod
+def create(
+    name: str,
+    repo_path: str = None,
+    description: str = None,
+    pipeline_type: PipelineType = PipelineType.PYTHON,
+    tags: list[str] = None,
+    execution_framework: str = None,
+) -> Pipeline
+```
+
+<ParamField path="name" type="str" required>
+  Name of the pipeline
+</ParamField>
+
+<ParamField path="repo_path" type="str">
+  Path to repository
+</ParamField>
+
+<ParamField path="description" type="str">
+  Pipeline description
+</ParamField>
+
+<ParamField path="pipeline_type" type="PipelineType" default="PipelineType.PYTHON">
+  Type of pipeline (PYTHON, STREAMING, INTEGRATION, DATABRICKS, PYSPARK)
+</ParamField>
+
+<ParamField path="tags" type="list[str]">
+  Tags for the pipeline
+</ParamField>
+
+<ParamField path="execution_framework" type="str">
+  Execution framework identifier
+</ParamField>
+
+<ResponseField name="return" type="Pipeline">
+  The newly created Pipeline instance
+</ResponseField>
+
+**Example:**
+
+```python
+from mage_ai.data_preparation.models.pipeline import Pipeline
+
+pipeline = Pipeline.create(
+    'my_data_pipeline',
+    description='Process customer data',
+    tags=['production', 'etl']
+)
+```
+
+### get
+
+Retrieves an existing pipeline by UUID.
+
+```python
+@classmethod
+def get(
+    uuid: str,
+    repo_path: str = None,
+    repo_config: RepoConfig = None,
+    check_if_exists: bool = False,
+    all_projects: bool = False,
+    context_data: dict = None,
+    use_repo_path: bool = False,
+) -> Pipeline
+```
+
+<ParamField path="uuid" type="str" required>
+  Pipeline UUID to retrieve
+</ParamField>
+
+<ParamField path="repo_path" type="str">
+  Repository path
+</ParamField>
+
+<ParamField path="check_if_exists" type="bool" default="False">
+  Return None if pipeline doesn't exist instead of raising an error
+</ParamField>
+
+<ResponseField name="return" type="Pipeline">
+  Pipeline instance or None if not found and check_if_exists is True
+</ResponseField>
+
+**Example:**
+
+```python
+pipeline = Pipeline.get('my_data_pipeline')
+print(f"Pipeline: {pipeline.name}")
+print(f"Blocks: {len(pipeline.blocks_by_uuid)}")
+```
+
+### get_all_pipelines
+
+Returns a list of all pipeline UUIDs in the repository.
+
+```python
+@classmethod
+def get_all_pipelines(
+    repo_path: str = None,
+    repo_paths: list[str] = None,
+    disable_pipelines_folder_creation: bool = False,
+    include_repo_path: bool = False,
+) -> list[str]
+```
+
+<ResponseField name="return" type="list[str] | list[tuple[str, str]]">
+  List of pipeline UUIDs, or list of tuples (uuid, repo_path) if include_repo_path is True
+</ResponseField>
+
+**Example:**
+
+```python
+all_pipelines = Pipeline.get_all_pipelines()
+for pipeline_uuid in all_pipelines:
+    print(f"Found pipeline: {pipeline_uuid}")
+```
+
+### exists
+
+Checks if a pipeline exists.
+
+```python
+@classmethod
+def exists(uuid: str, repo_path: str = None) -> bool
+```
+
+<ResponseField name="return" type="bool">
+  True if pipeline exists, False otherwise
+</ResponseField>
+
+## Instance Methods
+
+### add_block
+
+Adds a block to the pipeline.
+
+```python
+def add_block(
+    block: Block,
+    upstream_block_uuids: list[str] = None,
+    downstream_block_uuids: list[str] = None,
+    priority: int = None,
+    widget: bool = False,
+) -> Block
+```
+
+<ParamField path="block" type="Block" required>
+  Block instance to add
+</ParamField>
+
+<ParamField path="upstream_block_uuids" type="list[str]">
+  UUIDs of blocks that should execute before this block
+</ParamField>
+
+<ParamField path="downstream_block_uuids" type="list[str]">
+  UUIDs of blocks that should execute after this block
+</ParamField>
+
+<ParamField path="priority" type="int">
+  Execution priority order
+</ParamField>
+
+<ParamField path="widget" type="bool" default="False">
+  Whether this is a widget block
+</ParamField>
+
+<ResponseField name="return" type="Block">
+  The added block
+</ResponseField>
+
+**Example:**
+
+```python
+from mage_ai.data_preparation.models.block import Block
+
+block = Block.create(
+    'load_data',
+    'data_loader',
+    repo_path=pipeline.repo_path,
+    pipeline=pipeline
+)
+
+pipeline.add_block(block, upstream_block_uuids=[])
+```
+
+### get_block
+
+Retrieves a block from the pipeline by UUID.
+
+```python
+def get_block(
+    block_uuid: str,
+    block_type: str = None,
+    check_template: bool = False,
+    extension_uuid: str = None,
+    widget: bool = False,
+) -> Block
+```
+
+<ParamField path="block_uuid" type="str" required>
+  UUID of the block to retrieve
+</ParamField>
+
+<ParamField path="widget" type="bool" default="False">
+  Whether to look for the block in widgets
+</ParamField>
+
+<ResponseField name="return" type="Block">
+  Block instance or None if not found
+</ResponseField>
+
+**Example:**
+
+```python
+block = pipeline.get_block('load_data')
+if block:
+    print(f"Block type: {block.type}")
+    print(f"Upstream blocks: {block.upstream_block_uuids}")
+```
+
+### execute_sync
+
+Executes the pipeline synchronously.
+
+```python
+def execute_sync(
+    analyze_outputs: bool = False,
+    build_block_output_stdout: Callable = None,
+    global_vars: dict = None,
+    retry_config: dict = None,
+    run_sensors: bool = True,
+    run_tests: bool = True,
+    update_status: bool = True,
+) -> None
+```
+
+<ParamField path="analyze_outputs" type="bool" default="False">
+  Whether to analyze block outputs after execution
+</ParamField>
+
+<ParamField path="global_vars" type="dict">
+  Global variables available to all blocks
+</ParamField>
+
+<ParamField path="run_sensors" type="bool" default="True">
+  Whether to run sensor blocks
+</ParamField>
+
+<ParamField path="run_tests" type="bool" default="True">
+  Whether to run block tests
+</ParamField>
+
+**Example:**
+
+```python
+pipeline = Pipeline.get('my_pipeline')
+
+global_vars = {
+    'env': 'production',
+    'date': '2024-01-01'
+}
+
+pipeline.execute_sync(
+    global_vars=global_vars,
+    run_tests=True
+)
+```
+
+### async execute
+
+Executes the pipeline asynchronously with parallel block execution.
+
+```python
+async def execute(
+    analyze_outputs: bool = False,
+    build_block_output_stdout: Callable = None,
+    global_vars: dict = None,
+    parallel: bool = True,
+    run_sensors: bool = True,
+    run_tests: bool = True,
+    update_status: bool = True,
+) -> None
+```
+
+<ParamField path="parallel" type="bool" default="True">
+  Whether to execute independent blocks in parallel
+</ParamField>
+
+**Example:**
+
+```python
+import asyncio
+from mage_ai.data_preparation.models.pipeline import Pipeline
+
+async def run_pipeline():
+    pipeline = Pipeline.get('my_pipeline')
+    await pipeline.execute(
+        global_vars={'env': 'production'},
+        parallel=True
+    )
+
+asyncio.run(run_pipeline())
+```
+
+### save
+
+Saves the pipeline configuration to disk.
+
+```python
+def save(
+    block_type: str = None,
+    widget: bool = False,
+) -> None
+```
+
+**Example:**
+
+```python
+pipeline.description = "Updated description"
+pipeline.tags.append('new-tag')
+pipeline.save()
+```
+
+### to_dict
+
+Converts the pipeline to a dictionary representation.
+
+```python
+def to_dict(
+    include_content: bool = False,
+    include_extensions: bool = False,
+    include_outputs: bool = False,
+    sample_count: int = None,
+    exclude_data_integration: bool = False,
+) -> dict
+```
+
+<ResponseField name="return" type="dict">
+  Dictionary representation with keys: uuid, name, type, blocks, callbacks, conditionals, widgets, settings, etc.
+</ResponseField>
+
+**Example:**
+
+```python
+pipeline_dict = pipeline.to_dict(include_content=True)
+print(f"Pipeline has {len(pipeline_dict['blocks'])} blocks")
+```
+
+## Properties
+
+<ResponseField name="uuid" type="str">
+  Pipeline unique identifier
+</ResponseField>
+
+<ResponseField name="name" type="str">
+  Pipeline name
+</ResponseField>
+
+<ResponseField name="type" type="PipelineType">
+  Pipeline type (PYTHON, STREAMING, INTEGRATION, etc.)
+</ResponseField>
+
+<ResponseField name="blocks_by_uuid" type="dict[str, Block]">
+  Dictionary of blocks indexed by UUID
+</ResponseField>
+
+<ResponseField name="description" type="str">
+  Pipeline description
+</ResponseField>
+
+<ResponseField name="tags" type="list[str]">
+  List of tags
+</ResponseField>
+
+<ResponseField name="config_path" type="str">
+  Path to the pipeline's metadata.yaml file
+</ResponseField>
+
+<ResponseField name="dir_path" type="str">
+  Directory path containing pipeline files
+</ResponseField>
+
+<ResponseField name="variable_manager" type="VariableManager">
+  Manager for reading/writing pipeline variables
+</ResponseField>
+
+## Complete Example
+
+```python
+from mage_ai.data_preparation.models.pipeline import Pipeline, PipelineType
+from mage_ai.data_preparation.models.block import Block
+
+# Create a new pipeline
+pipeline = Pipeline.create(
+    'etl_pipeline',
+    description='ETL pipeline for customer data',
+    pipeline_type=PipelineType.PYTHON,
+    tags=['etl', 'customers']
+)
+
+# Add blocks to the pipeline
+loader = Block.create(
+    'load_customers',
+    'data_loader',
+    repo_path=pipeline.repo_path,
+    pipeline=pipeline
+)
+
+transformer = Block.create(
+    'transform_data',
+    'transformer',
+    repo_path=pipeline.repo_path,
+    pipeline=pipeline,
+    upstream_block_uuids=['load_customers']
+)
+
+exporter = Block.create(
+    'export_to_warehouse',
+    'data_exporter',
+    repo_path=pipeline.repo_path,
+    pipeline=pipeline,
+    upstream_block_uuids=['transform_data']
+)
+
+# Execute the pipeline
+pipeline.execute_sync(
+    global_vars={'environment': 'production'},
+    run_tests=True
+)
+
+print(f"Pipeline {pipeline.name} executed successfully")
+print(f"Total blocks: {len(pipeline.blocks_by_uuid)}")
+```

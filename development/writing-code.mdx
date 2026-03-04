@@ -1,0 +1,390 @@
+---
+title: 'Writing Block Code'
+description: 'Learn how to write Python, SQL, and R code blocks with proper decorators and patterns'
+---
+
+## Overview
+
+Mage blocks are Python, SQL, or R functions decorated with block type decorators. Each block type serves a specific purpose in your data pipeline.
+
+## Block Decorators
+
+Mage provides decorators to define block types:
+
+```python
+# From mage_ai/data_preparation/decorators.py
+
+from mage_ai.data_preparation.decorators import (
+    data_loader,
+    transformer,
+    data_exporter,
+    custom,
+    sensor,
+    test,
+)
+```
+
+<Note>
+  These decorators are dynamically generated at runtime during block execution and handle input/output variable management.
+</Note>
+
+## Block Types
+
+### Data Loader
+
+Load data from any source:
+
+```python
+if 'data_loader' not in globals():
+    from mage_ai.data_preparation.decorators import data_loader
+if 'test' not in globals():
+    from mage_ai.data_preparation.decorators import test
+
+import pandas as pd
+
+@data_loader
+def load_data(*args, **kwargs):
+    """
+    Load data from any source.
+    
+    Returns:
+        DataFrame, dict, list, or any Python object
+    """
+    # Access global variables
+    api_key = kwargs.get('api_key')
+    
+    # Load your data
+    df = pd.read_csv('data.csv')
+    
+    return df
+
+
+@test
+def test_output(output, *args) -> None:
+    """
+    Test that the output is valid.
+    """
+    assert output is not None, 'The output is undefined'
+    assert len(output) > 0, 'No data loaded'
+```
+
+### Transformer
+
+Transform data from upstream blocks:
+
+```python
+if 'transformer' not in globals():
+    from mage_ai.data_preparation.decorators import transformer
+if 'test' not in globals():
+    from mage_ai.data_preparation.decorators import test
+
+import pandas as pd
+
+@transformer
+def transform(data, *args, **kwargs):
+    """
+    Transform data from upstream blocks.
+    
+    Args:
+        data: Output from the first upstream block
+        *args: Outputs from additional upstream blocks (if any)
+        **kwargs: Global variables and runtime configuration
+    
+    Returns:
+        Transformed data
+    """
+    # Access multiple upstream outputs
+    if args:
+        data2 = args[0]  # Second upstream block output
+    
+    # Transform the data
+    df = data.copy()
+    df['new_column'] = df['existing_column'] * 2
+    
+    return df
+
+
+@test
+def test_output(output, *args) -> None:
+    assert output is not None, 'The output is undefined'
+    assert 'new_column' in output.columns, 'Transformation failed'
+```
+
+### Data Exporter
+
+Export data to external systems:
+
+```python
+if 'data_exporter' not in globals():
+    from mage_ai.data_preparation.decorators import data_exporter
+
+import pandas as pd
+
+@data_exporter
+def export_data(data, *args, **kwargs):
+    """
+    Export data to a destination.
+    
+    Args:
+        data: Output from upstream block
+    """
+    # Export to database, file, API, etc.
+    data.to_parquet('output.parquet')
+    
+    # Return metadata or confirmation
+    return {'rows_exported': len(data)}
+```
+
+### Custom Block
+
+Custom logic for any purpose:
+
+```python
+if 'custom' not in globals():
+    from mage_ai.data_preparation.decorators import custom
+
+@custom
+def execute_custom_logic(*args, **kwargs):
+    """
+    Execute custom business logic.
+    
+    Args:
+        *args: Outputs from upstream blocks
+        **kwargs: Global variables
+    
+    Returns:
+        Any output
+    """
+    # Custom logic
+    result = perform_calculation()
+    
+    return result
+```
+
+## Function Signature Validation
+
+Mage validates that your function signature matches upstream dependencies:
+
+```python
+# From mage_ai/data_preparation/models/block/__init__.py
+
+def _validate_execution(self, decorated_functions, input_vars):
+    """
+    Validate whether the number of function arguments matches the upstream blocks.
+    """
+    if len(decorated_functions) == 0:
+        raise Exception(
+            f'Block {self.uuid} does not have any decorated functions. '
+            f'Make sure that a function in the block is decorated with @{self.type}.'
+        )
+    
+    block_function = decorated_functions[0]
+    sig = signature(block_function)
+    
+    num_args = sum(
+        arg.kind not in (Parameter.VAR_POSITIONAL, Parameter.VAR_KEYWORD)
+        for arg in sig.parameters.values()
+    )
+    num_inputs = len(input_vars)
+    num_upstream = len(self.upstream_block_uuids)
+    
+    if num_args > num_inputs:
+        raise Exception(
+            f"Block {self.uuid} may be missing upstream dependencies. "
+            f'It expected to have {num_args} arguments, but only received {num_inputs}.'
+        )
+```
+
+## Multiple Outputs
+
+Return a list to create multiple output variables:
+
+```python
+@data_loader
+def load_multiple_datasets(**kwargs):
+    """
+    Load multiple datasets as separate outputs.
+    """
+    users_df = pd.read_csv('users.csv')
+    orders_df = pd.read_csv('orders.csv')
+    
+    # Return as list - each item becomes a separate output variable
+    return [users_df, orders_df]
+
+# Downstream blocks receive both outputs
+@transformer
+def transform(users, orders, **kwargs):
+    """
+    Args:
+        users: First output from upstream block (users_df)
+        orders: Second output from upstream block (orders_df)
+    """
+    merged = users.merge(orders, on='user_id')
+    return merged
+```
+
+## Accessing Global Variables
+
+Global variables are available via `**kwargs`:
+
+```python
+@data_loader
+def load_data(**kwargs):
+    # Access environment/global variables
+    env = kwargs.get('env', 'dev')
+    api_key = kwargs.get('api_key')
+    
+    # Access execution metadata
+    execution_date = kwargs.get('execution_date')
+    
+    # Access logger
+    logger = kwargs.get('logger')
+    if logger:
+        logger.info(f'Loading data for {execution_date}')
+    
+    return data
+```
+
+## SQL Blocks
+
+Write SQL code directly:
+
+```sql
+-- Load data with SQL
+SELECT 
+    user_id,
+    order_date,
+    amount
+FROM {{ df_1 }}  -- Reference upstream block outputs
+WHERE order_date >= '{{ execution_date }}'
+```
+
+<Note>
+  Use `{{ df_1 }}`, `{{ df_2 }}` etc. to reference outputs from upstream blocks in SQL.
+</Note>
+
+## R Blocks
+
+Write R code with similar patterns:
+
+```r
+library(dplyr)
+
+load_data <- function() {
+  # Load data
+  df <- read.csv('data.csv')
+  return(df)
+}
+
+transform_data <- function(data) {
+  # Transform data  
+  result <- data %>%
+    mutate(new_column = existing_column * 2)
+  return(result)
+}
+```
+
+## Block Configuration
+
+Access block configuration in your code:
+
+```python
+@data_loader
+def load_data(*args, **kwargs):
+    # Configuration defined in block metadata
+    config = kwargs.get('configuration', {})
+    
+    table_name = config.get('table_name', 'default_table')
+    batch_size = config.get('batch_size', 1000)
+    
+    # Use configuration
+    return load_from_database(table_name, batch_size)
+```
+
+## Dynamic Blocks
+
+Create blocks that spawn multiple child executions:
+
+```python
+@data_loader
+def load_data(**kwargs):
+    """
+    Return a list/dict to create dynamic child blocks.
+    Each child processes one item.
+    """
+    # Return list of items to process
+    return [
+        {'customer_id': 1, 'region': 'US'},
+        {'customer_id': 2, 'region': 'EU'},
+        {'customer_id': 3, 'region': 'APAC'},
+    ]
+
+@transformer
+def transform(data, **kwargs):
+    """
+    This runs once per item from the upstream dynamic block.
+    """
+    customer_id = data['customer_id']
+    region = data['region']
+    
+    # Process this specific customer
+    result = process_customer(customer_id, region)
+    
+    return result
+```
+
+## Template Interpolation
+
+Mage supports Jinja-style variable interpolation:
+
+```python
+# From mage_ai/data_preparation/models/block/content.py
+
+def hydrate_block_outputs(
+    content: str,
+    outputs_from_input_vars: Dict,
+    upstream_block_uuids: List[str],
+    variables: Dict,
+) -> str:
+    """
+    Interpolate variables and upstream outputs into block content.
+    
+    Supports:
+    - {{ variable_name }} - Global variables  
+    - {{ df_1 }}, {{ df_2 }} - Upstream block outputs
+    """
+```
+
+## Best Practices
+
+<Steps>
+  <Step title="Always use decorators">
+    Every block must have at least one decorated function matching its block type
+  </Step>
+  
+  <Step title="Match function parameters to upstream blocks">
+    Define one parameter per upstream block output (or use *args for variable inputs)
+  </Step>
+  
+  <Step title="Include test functions">
+    Add @test decorated functions to validate outputs
+  </Step>
+  
+  <Step title="Use **kwargs for flexibility">
+    Accept **kwargs to access global variables and future parameters
+  </Step>
+  
+  <Step title="Return consistent types">
+    Return the same data structure type on each execution
+  </Step>
+</Steps>
+
+<Warning>
+  Avoid circular references in return values. Mage needs to serialize outputs for storage.
+</Warning>
+
+## Next Steps
+
+- Learn about [testing blocks](/development/testing)
+- Understand [variables and secrets](/development/variables)
+- Explore [debugging and logging](/development/debugging)

@@ -1,0 +1,188 @@
+---
+title: "Dask Integration"
+sidebarTitle: "Dask"
+icon: "diagram-project"
+description: "Distributed computing with Dask for parallel data processing"
+---
+
+<Note>
+Dask integration is currently **not actively supported** in Mage. The implementation exists as commented code in the codebase but is not enabled in the current release.
+</Note>
+
+## Current Status
+
+Based on the source code analysis, Dask integration has been explored but is not currently active:
+
+```python mage_ai/data_preparation/models/utils.py
+# def dask_from_pandas(df: pd.DataFrame) -> dd:
+#     # Dask DataFrame conversion logic (commented out)
+```
+
+References exist in:
+- `mage_ai/data_preparation/models/variable.py` (commented imports)
+- Variable serialization logic (disabled)
+
+## Why Dask?
+
+Dask would provide several benefits for Mage users:
+
+1. **Parallel Processing**: Scale Pandas workloads across multiple cores or machines
+2. **Larger-than-Memory**: Process datasets that don't fit in RAM
+3. **Familiar API**: Use Pandas-like syntax with distributed execution
+4. **Dynamic Task Graphs**: Lazy evaluation and optimized execution plans
+
+## Alternative Solutions
+
+While native Dask integration is not available, you can still use Dask in Mage:
+
+### Option 1: Manual Dask Session
+
+Create and manage Dask clients directly in your blocks:
+
+<CodeGroup>
+```python Setup Dask Client
+from dask.distributed import Client
+import dask.dataframe as dd
+
+if 'data_loader' not in globals():
+    from mage_ai.data_preparation.decorators import data_loader
+
+@data_loader
+def load_data(*args, **kwargs):
+    # Create Dask client
+    client = Client(n_workers=4, threads_per_worker=2)
+    
+    # Store in context for other blocks
+    kwargs['context']['dask_client'] = client
+    
+    # Read data with Dask
+    ddf = dd.read_csv('s3://bucket/data/*.csv')
+    
+    return ddf
+```
+
+```python Use Dask DataFrame
+import dask.dataframe as dd
+
+if 'transformer' not in globals():
+    from mage_ai.data_preparation.decorators import transformer
+
+@transformer
+def transform(ddf: dd.DataFrame, *args, **kwargs):
+    # Access client from context
+    client = kwargs['context'].get('dask_client')
+    
+    # Perform Dask operations
+    result = ddf.groupby('category')['value'].mean().compute()
+    
+    return result
+```
+
+```python Cleanup
+if 'data_exporter' not in globals():
+    from mage_ai.data_preparation.decorators import data_exporter
+
+@data_exporter
+def export_data(df, *args, **kwargs):
+    # Export data
+    df.to_csv('output.csv', index=False)
+    
+    # Close Dask client
+    client = kwargs['context'].get('dask_client')
+    if client:
+        client.close()
+```
+</CodeGroup>
+
+### Option 2: Dask on Kubernetes
+
+Deploy a Dask cluster on Kubernetes and connect from Mage:
+
+<Steps>
+  <Step title="Deploy Dask Cluster">
+    Use Helm to deploy Dask:
+    
+    ```bash
+    helm repo add dask https://helm.dask.org/
+    helm install my-dask dask/dask
+    ```
+  </Step>
+  
+  <Step title="Get Scheduler Address">
+    ```bash
+    kubectl get service my-dask-scheduler
+    ```
+  </Step>
+  
+  <Step title="Connect from Mage">
+    ```python
+    from dask.distributed import Client
+    
+    client = Client('tcp://my-dask-scheduler:8786')
+    ```
+  </Step>
+</Steps>
+
+### Option 3: Use Spark Instead
+
+For production-grade distributed computing, consider using [Spark integration](/integrations/compute/spark):
+
+<CardGroup cols={2}>
+  <Card title="Spark Integration" icon="sparkles" href="/integrations/compute/spark">
+    Full PySpark support with AWS EMR
+  </Card>
+  
+  <Card title="Kubernetes Executor" icon="dharmachakra" href="/integrations/compute/kubernetes">
+    Run distributed workloads on K8s
+  </Card>
+</CardGroup>
+
+## Feature Request
+
+Interested in native Dask integration? We'd love to hear from you:
+
+- Vote on the feature request in [GitHub Issues](https://github.com/mage-ai/mage-ai/issues)
+- Join the discussion in [Mage Slack](https://www.mage.ai/chat)
+- Contribute to the implementation
+
+## Comparison: Dask vs Spark
+
+| Feature | Dask | Spark (Supported) |
+|---------|------|------------------|
+| API Familiarity | Pandas-like | SQL + DataFrame API |
+| Setup Complexity | Low | Medium (requires EMR/cluster) |
+| Ecosystem | Python-focused | Multi-language (Python, Scala, Java) |
+| Performance | Good for Python workloads | Excellent for JVM workloads |
+| Mage Integration | Manual setup required | Native integration |
+| Cloud Support | Self-managed | AWS EMR (managed) |
+
+## Best Practices for Manual Dask Usage
+
+If you choose to use Dask manually in Mage:
+
+1. **Client Management**: Always create clients at the beginning and close them at the end
+2. **Context Sharing**: Store the Dask client in `kwargs['context']` to share across blocks
+3. **Compute Strategically**: Use `.compute()` only when necessary to trigger execution
+4. **Memory Monitoring**: Monitor Dask dashboard for memory usage and task graphs
+5. **Chunking**: Partition data appropriately with `blocksize` parameter
+6. **Persistence**: Use `.persist()` for intermediate results used multiple times
+
+## Related Resources
+
+<CardGroup cols={2}>
+  <Card title="Dask Documentation" icon="book" href="https://docs.dask.org/">
+    Official Dask documentation
+  </Card>
+  
+  <Card title="Dask on Kubernetes" icon="dharmachakra" href="https://kubernetes.dask.org/">
+    Deploy Dask clusters on Kubernetes
+  </Card>
+  
+  <Card title="Spark Integration" icon="sparkles" href="/integrations/compute/spark">
+    Alternative distributed computing with Spark
+  </Card>
+  
+  <Card title="GitHub Issues" icon="github" href="https://github.com/mage-ai/mage-ai/issues">
+    Request native Dask support
+  </Card>
+</CardGroup>

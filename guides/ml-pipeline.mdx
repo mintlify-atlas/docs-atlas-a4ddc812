@@ -1,0 +1,1033 @@
+---
+title: "Building ML Pipelines"
+description: "Create end-to-end machine learning pipelines with training, validation, and inference in Mage"
+icon: "brain"
+---
+
+## Overview
+
+Learn how to build production-ready machine learning pipelines in Mage. This tutorial covers:
+
+- Data preparation for ML
+- Model training and validation
+- Hyperparameter tuning
+- Model versioning and tracking
+- Batch and real-time inference
+- Model monitoring and retraining
+
+<Tip>
+Mage makes it easy to operationalize ML workflows by treating model training and inference as pipeline blocks that integrate seamlessly with your data infrastructure.
+</Tip>
+
+## Prerequisites
+
+- Mage installed and running
+- Python ML libraries: `scikit-learn`, `pandas`, `numpy`
+- Basic understanding of machine learning concepts
+- A dataset for training
+
+## What You'll Build
+
+An end-to-end ML pipeline that:
+
+1. Loads and prepares training data
+2. Engineers features
+3. Trains and validates a model
+4. Saves the model with versioning
+5. Runs batch predictions
+6. Monitors model performance
+
+---
+
+<Steps>
+
+<Step title="Create an ML Pipeline">
+
+Start by creating a new pipeline for ML workflows:
+
+1. Navigate to **Pipelines** in Mage
+2. Click **+ New pipeline**
+3. Select **Standard (batch)**
+4. Name it `customer_churn_ml`
+
+<Note>
+ML pipelines are typically batch pipelines that run on schedules. For real-time predictions, you can create a separate inference pipeline or use streaming pipelines.
+</Note>
+
+</Step>
+
+<Step title="Load and Explore Training Data">
+
+First, load your training dataset.
+
+1. Add a **Data loader** block
+2. Name it `load_training_data`
+
+```python
+import pandas as pd
+from mage_ai.settings.repo import get_repo_path
+from mage_ai.io.config import ConfigFileLoader
+from mage_ai.io.postgres import Postgres
+from os import path
+
+if 'data_loader' not in globals():
+    from mage_ai.data_preparation.decorators import data_loader
+
+@data_loader
+def load_training_data(*args, **kwargs):
+    """
+    Load historical customer data for churn prediction
+    """
+    query = """
+        SELECT 
+            c.customer_id,
+            c.signup_date,
+            c.country,
+            c.subscription_tier,
+            -- Customer metrics
+            COUNT(DISTINCT o.order_id) as total_orders,
+            SUM(o.order_amount) as total_spent,
+            AVG(o.order_amount) as avg_order_value,
+            MAX(o.order_date) as last_order_date,
+            MIN(o.order_date) as first_order_date,
+            -- Engagement metrics
+            COUNT(DISTINCT s.session_id) as total_sessions,
+            AVG(s.duration_minutes) as avg_session_duration,
+            -- Support metrics  
+            COUNT(DISTINCT t.ticket_id) as support_tickets,
+            -- Target variable
+            c.churned as churn_label
+        FROM customers c
+        LEFT JOIN orders o ON c.customer_id = o.customer_id
+        LEFT JOIN sessions s ON c.customer_id = s.customer_id
+        LEFT JOIN support_tickets t ON c.customer_id = t.customer_id
+        WHERE c.signup_date >= CURRENT_DATE - INTERVAL '2 years'
+        GROUP BY c.customer_id, c.signup_date, c.country, 
+                 c.subscription_tier, c.churned
+    """
+    
+    config_path = path.join(get_repo_path(), 'io_config.yaml')
+    config_profile = 'default'
+
+    with Postgres.with_config(ConfigFileLoader(config_path, config_profile)) as loader:
+        df = loader.load(query)
+    
+    print(f"Loaded {len(df)} customers")
+    print(f"Churn rate: {df['churn_label'].mean():.2%}")
+    print(f"\nDataset shape: {df.shape}")
+    print(f"\nFeature dtypes:\n{df.dtypes}")
+    
+    return df
+```
+
+### Add Data Exploration
+
+```python
+from mage_ai.data_preparation.decorators import test
+
+@test
+def test_data_quality(output, *args):
+    """
+    Validate training data quality
+    """
+    assert len(output) > 1000, 'Insufficient training data'
+    assert output['churn_label'].notna().all(), 'Missing labels'
+    assert output['customer_id'].is_unique, 'Duplicate customers'
+    
+    # Check for minimum churn rate
+    churn_rate = output['churn_label'].mean()
+    assert churn_rate > 0.01, f'Churn rate too low: {churn_rate:.2%}'
+    
+    print('Data quality checks passed!')
+```
+
+</Step>
+
+<Step title="Feature Engineering">
+
+Create ML features from raw data.
+
+1. Add a **Transformer** block
+2. Name it `engineer_features`
+
+```python
+import pandas as pd
+import numpy as np
+from datetime import datetime
+
+if 'transformer' not in globals():
+    from mage_ai.data_preparation.decorators import transformer
+
+@transformer
+def engineer_features(data: pd.DataFrame, *args, **kwargs):
+    """
+    Engineer features for churn prediction
+    """
+    df = data.copy()
+    
+    # Temporal features
+    df['signup_date'] = pd.to_datetime(df['signup_date'])
+    df['last_order_date'] = pd.to_datetime(df['last_order_date'])
+    df['first_order_date'] = pd.to_datetime(df['first_order_date'])
+    
+    current_date = datetime.now()
+    df['customer_age_days'] = (current_date - df['signup_date']).dt.days
+    df['days_since_last_order'] = (current_date - df['last_order_date']).dt.days
+    df['customer_lifetime_days'] = (
+        df['last_order_date'] - df['first_order_date']
+    ).dt.days
+    
+    # Behavioral features
+    df['orders_per_day'] = df['total_orders'] / (df['customer_age_days'] + 1)
+    df['spend_per_day'] = df['total_spent'] / (df['customer_age_days'] + 1)
+    df['sessions_per_day'] = df['total_sessions'] / (df['customer_age_days'] + 1)
+    
+    # Engagement features
+    df['has_recent_order'] = (df['days_since_last_order'] <= 30).astype(int)
+    df['is_high_value'] = (df['total_spent'] > df['total_spent'].quantile(0.75)).astype(int)
+    df['has_support_tickets'] = (df['support_tickets'] > 0).astype(int)
+    
+    # RFM features (Recency, Frequency, Monetary)
+    df['rfm_recency'] = pd.qcut(
+        df['days_since_last_order'],
+        q=4,
+        labels=[4, 3, 2, 1],
+        duplicates='drop'
+    ).astype(float)
+    
+    df['rfm_frequency'] = pd.qcut(
+        df['total_orders'],
+        q=4,
+        labels=[1, 2, 3, 4],
+        duplicates='drop'
+    ).astype(float)
+    
+    df['rfm_monetary'] = pd.qcut(
+        df['total_spent'],
+        q=4,
+        labels=[1, 2, 3, 4],
+        duplicates='drop'
+    ).astype(float)
+    
+    df['rfm_score'] = df['rfm_recency'] + df['rfm_frequency'] + df['rfm_monetary']
+    
+    # Handle missing values
+    df['days_since_last_order'].fillna(df['customer_age_days'], inplace=True)
+    df['avg_session_duration'].fillna(0, inplace=True)
+    
+    # Categorical encoding
+    df = pd.get_dummies(
+        df,
+        columns=['country', 'subscription_tier'],
+        prefix=['country', 'tier'],
+        drop_first=True
+    )
+    
+    print(f"Engineered features: {df.shape[1]} total columns")
+    print(f"\nNew features created:")
+    new_features = [
+        'customer_age_days', 'days_since_last_order', 'orders_per_day',
+        'spend_per_day', 'rfm_score', 'has_recent_order'
+    ]
+    for feat in new_features:
+        if feat in df.columns:
+            print(f"  - {feat}")
+    
+    return df
+
+
+@test
+def test_no_missing_values(output, *args):
+    """
+    Ensure no missing values in feature set
+    """
+    missing = output.isnull().sum()
+    assert missing.sum() == 0, f'Missing values found:\n{missing[missing > 0]}'
+
+
+@test
+def test_feature_ranges(output, *args):
+    """
+    Validate feature value ranges
+    """
+    assert (output['customer_age_days'] >= 0).all(), 'Negative customer age'
+    assert (output['total_orders'] >= 0).all(), 'Negative order count'
+    assert (output['total_spent'] >= 0).all(), 'Negative spend amount'
+```
+
+</Step>
+
+<Step title="Train-Test Split">
+
+Split data into training and validation sets.
+
+1. Add a **Transformer** block
+2. Name it `train_test_split`
+
+```python
+import pandas as pd
+from sklearn.model_selection import train_test_split
+
+if 'transformer' not in globals():
+    from mage_ai.data_preparation.decorators import transformer
+
+@transformer
+def split_data(data: pd.DataFrame, *args, **kwargs):
+    """
+    Split data into train and validation sets
+    """
+    # Define feature columns (exclude ID and target)
+    feature_cols = [col for col in data.columns 
+                   if col not in ['customer_id', 'churn_label', 
+                                  'signup_date', 'last_order_date', 
+                                  'first_order_date']]
+    
+    X = data[feature_cols]
+    y = data['churn_label']
+    
+    # Split with stratification to maintain class balance
+    X_train, X_val, y_train, y_val = train_test_split(
+        X, y,
+        test_size=0.2,
+        random_state=42,
+        stratify=y
+    )
+    
+    print(f"Training set: {len(X_train)} samples")
+    print(f"Validation set: {len(X_val)} samples")
+    print(f"\nTraining churn rate: {y_train.mean():.2%}")
+    print(f"Validation churn rate: {y_val.mean():.2%}")
+    print(f"\nNumber of features: {X_train.shape[1]}")
+    
+    # Return as dictionary
+    return {
+        'X_train': X_train,
+        'X_val': X_val,
+        'y_train': y_train,
+        'y_val': y_val,
+        'feature_names': feature_cols
+    }
+```
+
+</Step>
+
+<Step title="Train Model">
+
+Train a machine learning model.
+
+1. Add a **Custom** block
+2. Name it `train_model`
+
+```python
+import pickle
+import pandas as pd
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.preprocessing import StandardScaler
+from sklearn.metrics import (
+    accuracy_score,
+    precision_score,
+    recall_score,
+    f1_score,
+    roc_auc_score,
+    confusion_matrix,
+    classification_report
+)
+from datetime import datetime
+import os
+
+if 'custom' not in globals():
+    from mage_ai.data_preparation.decorators import custom
+
+@custom
+def train_model(data: dict, *args, **kwargs):
+    """
+    Train Random Forest classifier for churn prediction
+    """
+    # Extract data
+    X_train = data['X_train']
+    X_val = data['X_val']
+    y_train = data['y_train']
+    y_val = data['y_val']
+    feature_names = data['feature_names']
+    
+    # Scale features
+    scaler = StandardScaler()
+    X_train_scaled = scaler.fit_transform(X_train)
+    X_val_scaled = scaler.transform(X_val)
+    
+    # Train model
+    print("Training Random Forest model...")
+    model = RandomForestClassifier(
+        n_estimators=100,
+        max_depth=10,
+        min_samples_split=20,
+        min_samples_leaf=10,
+        class_weight='balanced',
+        random_state=42,
+        n_jobs=-1
+    )
+    
+    model.fit(X_train_scaled, y_train)
+    print("Model training complete!")
+    
+    # Predictions
+    y_train_pred = model.predict(X_train_scaled)
+    y_val_pred = model.predict(X_val_scaled)
+    y_val_proba = model.predict_proba(X_val_scaled)[:, 1]
+    
+    # Evaluate
+    train_metrics = {
+        'accuracy': accuracy_score(y_train, y_train_pred),
+        'precision': precision_score(y_train, y_train_pred),
+        'recall': recall_score(y_train, y_train_pred),
+        'f1': f1_score(y_train, y_train_pred),
+    }
+    
+    val_metrics = {
+        'accuracy': accuracy_score(y_val, y_val_pred),
+        'precision': precision_score(y_val, y_val_pred),
+        'recall': recall_score(y_val, y_val_pred),
+        'f1': f1_score(y_val, y_val_pred),
+        'roc_auc': roc_auc_score(y_val, y_val_proba),
+    }
+    
+    print("\n=== Training Metrics ===")
+    for metric, value in train_metrics.items():
+        print(f"{metric}: {value:.4f}")
+    
+    print("\n=== Validation Metrics ===")
+    for metric, value in val_metrics.items():
+        print(f"{metric}: {value:.4f}")
+    
+    print("\n=== Confusion Matrix ===")
+    print(confusion_matrix(y_val, y_val_pred))
+    
+    print("\n=== Classification Report ===")
+    print(classification_report(y_val, y_val_pred))
+    
+    # Feature importance
+    feature_importance = pd.DataFrame({
+        'feature': feature_names,
+        'importance': model.feature_importances_
+    }).sort_values('importance', ascending=False)
+    
+    print("\n=== Top 10 Features ===")
+    print(feature_importance.head(10))
+    
+    # Save model
+    from mage_ai.settings.repo import get_repo_path
+    model_dir = os.path.join(get_repo_path(), 'models')
+    os.makedirs(model_dir, exist_ok=True)
+    
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    model_path = os.path.join(model_dir, f'churn_model_{timestamp}.pkl')
+    scaler_path = os.path.join(model_dir, f'scaler_{timestamp}.pkl')
+    
+    with open(model_path, 'wb') as f:
+        pickle.dump(model, f)
+    
+    with open(scaler_path, 'wb') as f:
+        pickle.dump(scaler, f)
+    
+    print(f"\nModel saved to: {model_path}")
+    print(f"Scaler saved to: {scaler_path}")
+    
+    return {
+        'model': model,
+        'scaler': scaler,
+        'model_path': model_path,
+        'scaler_path': scaler_path,
+        'train_metrics': train_metrics,
+        'val_metrics': val_metrics,
+        'feature_importance': feature_importance,
+        'feature_names': feature_names
+    }
+
+
+@test
+def test_model_performance(output, *args):
+    """
+    Ensure model meets minimum performance thresholds
+    """
+    val_metrics = output['val_metrics']
+    
+    assert val_metrics['roc_auc'] >= 0.70, \
+        f"ROC AUC too low: {val_metrics['roc_auc']:.4f}"
+    
+    assert val_metrics['recall'] >= 0.60, \
+        f"Recall too low: {val_metrics['recall']:.4f}"
+    
+    print("Model performance tests passed!")
+```
+
+</Step>
+
+<Step title="Hyperparameter Tuning (Optional)">
+
+Optimize model hyperparameters.
+
+```python
+from sklearn.model_selection import GridSearchCV, RandomizedSearchCV
+from scipy.stats import randint, uniform
+
+if 'custom' not in globals():
+    from mage_ai.data_preparation.decorators import custom
+
+@custom
+def hyperparameter_tuning(data: dict, *args, **kwargs):
+    """
+    Perform hyperparameter tuning with cross-validation
+    """
+    X_train = data['X_train']
+    y_train = data['y_train']
+    
+    # Scale features
+    scaler = StandardScaler()
+    X_train_scaled = scaler.fit_transform(X_train)
+    
+    # Define parameter grid
+    param_distributions = {
+        'n_estimators': randint(50, 200),
+        'max_depth': randint(5, 20),
+        'min_samples_split': randint(10, 50),
+        'min_samples_leaf': randint(5, 20),
+        'max_features': ['sqrt', 'log2', None],
+    }
+    
+    # Base model
+    base_model = RandomForestClassifier(
+        class_weight='balanced',
+        random_state=42,
+        n_jobs=-1
+    )
+    
+    # Randomized search
+    print("Starting hyperparameter tuning...")
+    search = RandomizedSearchCV(
+        base_model,
+        param_distributions,
+        n_iter=20,
+        cv=3,
+        scoring='roc_auc',
+        n_jobs=-1,
+        random_state=42,
+        verbose=2
+    )
+    
+    search.fit(X_train_scaled, y_train)
+    
+    print("\nBest parameters:")
+    print(search.best_params_)
+    print(f"\nBest cross-validation score: {search.best_score_:.4f}")
+    
+    return {
+        'best_model': search.best_estimator_,
+        'best_params': search.best_params_,
+        'best_score': search.best_score_,
+        'scaler': scaler
+    }
+```
+
+</Step>
+
+<Step title="Batch Inference">
+
+Create a pipeline for batch predictions.
+
+1. Create a new pipeline: `churn_prediction_batch`
+2. Add a **Data loader** to load customers for prediction
+
+```python
+if 'data_loader' not in globals():
+    from mage_ai.data_preparation.decorators import data_loader
+
+@data_loader
+def load_customers_for_prediction(*args, **kwargs):
+    """
+    Load active customers for churn prediction
+    """
+    query = """
+        SELECT 
+            customer_id,
+            -- Include same features as training data
+            total_orders,
+            total_spent,
+            avg_order_value,
+            -- ... all other features
+        FROM customer_features
+        WHERE churned = FALSE
+          AND is_active = TRUE
+    """
+    
+    config_path = path.join(get_repo_path(), 'io_config.yaml')
+    with Postgres.with_config(ConfigFileLoader(config_path, 'default')) as loader:
+        df = loader.load(query)
+    
+    print(f"Loaded {len(df)} customers for prediction")
+    return df
+```
+
+3. Add a **Transformer** to apply the same feature engineering
+
+```python
+@transformer
+def prepare_features_for_inference(data: pd.DataFrame, *args, **kwargs):
+    """
+    Apply same feature engineering as training
+    """
+    # Reuse the feature engineering logic from training
+    df = engineer_features(data)
+    return df
+```
+
+4. Add a **Custom** block to generate predictions
+
+```python
+import pickle
+import pandas as pd
+from datetime import datetime
+import os
+
+if 'custom' not in globals():
+    from mage_ai.data_preparation.decorators import custom
+
+@custom
+def generate_predictions(data: pd.DataFrame, *args, **kwargs):
+    """
+    Generate churn predictions using trained model
+    """
+    from mage_ai.settings.repo import get_repo_path
+    
+    # Load latest model
+    model_dir = os.path.join(get_repo_path(), 'models')
+    model_files = [f for f in os.listdir(model_dir) if f.startswith('churn_model_')]
+    latest_model = sorted(model_files)[-1]
+    latest_scaler = latest_model.replace('churn_model_', 'scaler_')
+    
+    model_path = os.path.join(model_dir, latest_model)
+    scaler_path = os.path.join(model_dir, latest_scaler)
+    
+    print(f"Loading model: {latest_model}")
+    
+    with open(model_path, 'rb') as f:
+        model = pickle.load(f)
+    
+    with open(scaler_path, 'rb') as f:
+        scaler = pickle.load(f)
+    
+    # Prepare features
+    feature_cols = [col for col in data.columns 
+                   if col not in ['customer_id', 'signup_date', 
+                                  'last_order_date', 'first_order_date']]
+    
+    X = data[feature_cols]
+    X_scaled = scaler.transform(X)
+    
+    # Generate predictions
+    predictions = model.predict(X_scaled)
+    probabilities = model.predict_proba(X_scaled)[:, 1]
+    
+    # Create results DataFrame
+    results = pd.DataFrame({
+        'customer_id': data['customer_id'],
+        'churn_prediction': predictions,
+        'churn_probability': probabilities,
+        'prediction_date': datetime.now(),
+        'model_version': latest_model
+    })
+    
+    # Add risk segments
+    results['risk_segment'] = pd.cut(
+        results['churn_probability'],
+        bins=[0, 0.3, 0.6, 1.0],
+        labels=['Low Risk', 'Medium Risk', 'High Risk']
+    )
+    
+    print(f"\nPredictions generated for {len(results)} customers")
+    print(f"\nRisk distribution:")
+    print(results['risk_segment'].value_counts())
+    print(f"\nAverage churn probability: {probabilities.mean():.2%}")
+    
+    return results
+```
+
+5. Add a **Data exporter** to save predictions
+
+```python
+if 'data_exporter' not in globals():
+    from mage_ai.data_preparation.decorators import data_exporter
+
+@data_exporter
+def save_predictions(data: pd.DataFrame, *args, **kwargs):
+    """
+    Save predictions to database
+    """
+    config_path = path.join(get_repo_path(), 'io_config.yaml')
+    
+    schema_name = 'ml_predictions'
+    table_name = 'churn_predictions'
+    
+    with Postgres.with_config(ConfigFileLoader(config_path, 'default')) as loader:
+        loader.export(
+            data,
+            schema_name,
+            table_name,
+            index=False,
+            if_exists='append',
+        )
+    
+    print(f"Saved {len(data)} predictions to {schema_name}.{table_name}")
+```
+
+</Step>
+
+<Step title="Model Monitoring">
+
+Monitor model performance over time.
+
+```python
+import pandas as pd
+from datetime import datetime, timedelta
+
+if 'custom' not in globals():
+    from mage_ai.data_preparation.decorators import custom
+
+@custom
+def monitor_model_performance(*args, **kwargs):
+    """
+    Monitor model performance and detect drift
+    """
+    # Load recent predictions and actual outcomes
+    query = """
+        SELECT 
+            p.customer_id,
+            p.churn_prediction,
+            p.churn_probability,
+            p.prediction_date,
+            c.churned as actual_churn,
+            c.churn_date
+        FROM ml_predictions.churn_predictions p
+        JOIN customers c ON p.customer_id = c.customer_id
+        WHERE p.prediction_date >= CURRENT_DATE - INTERVAL '30 days'
+          AND c.churn_date IS NOT NULL
+    """
+    
+    config_path = path.join(get_repo_path(), 'io_config.yaml')
+    with Postgres.with_config(ConfigFileLoader(config_path, 'default')) as loader:
+        df = loader.load(query)
+    
+    if len(df) == 0:
+        print("No data available for monitoring")
+        return {'status': 'no_data'}
+    
+    # Calculate performance metrics
+    from sklearn.metrics import (
+        accuracy_score,
+        precision_score,
+        recall_score,
+        roc_auc_score
+    )
+    
+    accuracy = accuracy_score(df['actual_churn'], df['churn_prediction'])
+    precision = precision_score(df['actual_churn'], df['churn_prediction'])
+    recall = recall_score(df['actual_churn'], df['churn_prediction'])
+    roc_auc = roc_auc_score(df['actual_churn'], df['churn_probability'])
+    
+    metrics = {
+        'accuracy': accuracy,
+        'precision': precision,
+        'recall': recall,
+        'roc_auc': roc_auc,
+        'sample_size': len(df),
+        'evaluation_date': datetime.now()
+    }
+    
+    print("\n=== Model Performance (Last 30 Days) ===")
+    print(f"Sample size: {len(df)}")
+    print(f"Accuracy: {accuracy:.4f}")
+    print(f"Precision: {precision:.4f}")
+    print(f"Recall: {recall:.4f}")
+    print(f"ROC AUC: {roc_auc:.4f}")
+    
+    # Check for performance degradation
+    performance_threshold = 0.70
+    if roc_auc < performance_threshold:
+        print(f"\n⚠️  WARNING: Model performance below threshold!")
+        print(f"   Current ROC AUC: {roc_auc:.4f}")
+        print(f"   Threshold: {performance_threshold:.4f}")
+        print(f"   Consider retraining the model.")
+        
+        # Trigger alert
+        metrics['alert'] = 'performance_degradation'
+    
+    # Save metrics
+    metrics_df = pd.DataFrame([metrics])
+    with Postgres.with_config(ConfigFileLoader(config_path, 'default')) as loader:
+        loader.export(
+            metrics_df,
+            'ml_monitoring',
+            'model_performance',
+            if_exists='append'
+        )
+    
+    return metrics
+```
+
+</Step>
+
+</Steps>
+
+---
+
+## Advanced ML Patterns
+
+### Model Versioning with MLflow
+
+```python
+import mlflow
+import mlflow.sklearn
+
+@custom
+def train_with_mlflow(data: dict, *args, **kwargs):
+    """
+    Train model with MLflow tracking
+    """
+    mlflow.set_experiment("churn-prediction")
+    
+    with mlflow.start_run():
+        # Train model
+        model = RandomForestClassifier(**params)
+        model.fit(X_train, y_train)
+        
+        # Log parameters
+        mlflow.log_params(params)
+        
+        # Log metrics
+        mlflow.log_metrics({
+            'train_accuracy': train_accuracy,
+            'val_accuracy': val_accuracy,
+            'roc_auc': roc_auc
+        })
+        
+        # Log model
+        mlflow.sklearn.log_model(model, "model")
+        
+        # Log feature importance plot
+        import matplotlib.pyplot as plt
+        fig, ax = plt.subplots()
+        feature_importance.plot(kind='bar', ax=ax)
+        mlflow.log_figure(fig, "feature_importance.png")
+        
+        return model
+```
+
+### Online Feature Store Integration
+
+```python
+from feast import FeatureStore
+
+@data_loader
+def load_features_from_feast(*args, **kwargs):
+    """
+    Load features from Feast feature store
+    """
+    store = FeatureStore(repo_path=".")
+    
+    # Define entity DataFrame
+    entity_df = pd.DataFrame({
+        'customer_id': customer_ids,
+        'event_timestamp': [datetime.now()] * len(customer_ids)
+    })
+    
+    # Get features
+    features = store.get_historical_features(
+        entity_df=entity_df,
+        features=[
+            'customer_features:total_orders',
+            'customer_features:total_spent',
+            'customer_features:last_order_date',
+        ]
+    ).to_df()
+    
+    return features
+```
+
+### A/B Testing Models
+
+```python
+import random
+
+@custom
+def ab_test_models(data: pd.DataFrame, *args, **kwargs):
+    """
+    Split traffic between model versions
+    """
+    # Load both models
+    model_a = load_model('model_v1.pkl')
+    model_b = load_model('model_v2.pkl')
+    
+    # Assign customers to variants
+    data['variant'] = data['customer_id'].apply(
+        lambda x: 'A' if hash(x) % 2 == 0 else 'B'
+    )
+    
+    # Generate predictions
+    data_a = data[data['variant'] == 'A']
+    data_b = data[data['variant'] == 'B']
+    
+    predictions_a = model_a.predict(data_a[features])
+    predictions_b = model_b.predict(data_b[features])
+    
+    # Combine results
+    results = pd.concat([
+        pd.DataFrame({
+            'customer_id': data_a['customer_id'],
+            'prediction': predictions_a,
+            'model_version': 'A'
+        }),
+        pd.DataFrame({
+            'customer_id': data_b['customer_id'],
+            'prediction': predictions_b,
+            'model_version': 'B'
+        })
+    ])
+    
+    return results
+```
+
+---
+
+## Real-time Inference
+
+For real-time predictions, create a streaming pipeline:
+
+```python
+from mage_ai.streaming.sources.base_python import BasePythonSource
+
+if 'streaming_source' not in globals():
+    from mage_ai.data_preparation.decorators import streaming_source
+
+@streaming_source
+class RealtimeInferenceSource(BasePythonSource):
+    def init_client(self):
+        # Load model once at initialization
+        self.model = load_model('churn_model.pkl')
+        self.scaler = load_scaler('scaler.pkl')
+    
+    def read(self, handler):
+        # Process incoming events
+        while True:
+            event = self.fetch_event()  # From Kafka/queue
+            
+            # Extract features
+            features = self.extract_features(event)
+            features_scaled = self.scaler.transform([features])
+            
+            # Predict
+            prediction = self.model.predict(features_scaled)[0]
+            probability = self.model.predict_proba(features_scaled)[0][1]
+            
+            # Send result
+            handler({
+                'customer_id': event['customer_id'],
+                'prediction': prediction,
+                'probability': probability,
+                'timestamp': datetime.now()
+            })
+```
+
+---
+
+## Deployment Best Practices
+
+<AccordionGroup>
+  <Accordion title="Model Registry" icon="database">
+    Maintain a model registry with versioning:
+    
+    ```python
+    # Save with metadata
+    model_metadata = {
+        'version': '1.0.0',
+        'training_date': datetime.now(),
+        'metrics': val_metrics,
+        'features': feature_names,
+        'hyperparameters': params
+    }
+    
+    with open('model_metadata.json', 'w') as f:
+        json.dump(model_metadata, f)
+    ```
+  </Accordion>
+  
+  <Accordion title="Automated Retraining" icon="rotate">
+    Schedule automatic model retraining:
+    
+    ```yaml
+    # Trigger configuration
+    schedule_type: time
+    schedule_interval: "0 0 * * 0"  # Weekly
+    ```
+  </Accordion>
+  
+  <Accordion title="Shadow Mode" icon="moon">
+    Deploy new models in shadow mode:
+    
+    ```python
+    # Generate predictions with both models
+    prod_prediction = prod_model.predict(X)
+    shadow_prediction = new_model.predict(X)
+    
+    # Log differences for analysis
+    log_prediction_comparison(
+        prod_prediction,
+        shadow_prediction
+    )
+    ```
+  </Accordion>
+</AccordionGroup>
+
+---
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="Model performance degrading" icon="chart-line-down">
+    - Check for data drift in features
+    - Verify feature distributions match training
+    - Consider retraining with recent data
+    - Review for concept drift
+  </Accordion>
+  
+  <Accordion title="Slow predictions" icon="hourglass">
+    - Use model compression techniques
+    - Implement feature caching
+    - Batch predictions when possible
+    - Consider model simplification
+  </Accordion>
+  
+  <Accordion title="Memory issues during training" icon="memory">
+    - Use incremental learning
+    - Sample training data
+    - Reduce feature dimensionality
+    - Use out-of-core learning
+  </Accordion>
+</AccordionGroup>
+
+---
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Production Deployment" icon="rocket" href="/deployment/cloud-providers">
+    Deploy ML pipelines to production
+  </Card>
+  <Card title="Observability" icon="chart-line" href="/orchestration/monitoring">
+    Monitor ML pipeline performance
+  </Card>
+  <Card title="Data Quality" icon="shield-check" href="/development/testing">
+    Implement data validation for ML
+  </Card>
+  <Card title="API Integration" icon="code" href="/api/rest/authentication">
+    Serve predictions via REST API
+  </Card>
+</CardGroup>

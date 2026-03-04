@@ -1,0 +1,574 @@
+---
+title: "Pipeline Run Endpoints"
+description: "REST API endpoints for executing and monitoring pipeline runs"
+---
+
+## Overview
+
+Pipeline run endpoints allow you to trigger, monitor, and manage pipeline executions.
+
+## Base URL
+
+```
+http://localhost:6789/api/pipeline_runs
+```
+
+## List Pipeline Runs
+
+Retrieve a list of pipeline runs.
+
+```http
+GET /api/pipeline_runs
+```
+
+### Query Parameters
+
+<ParamField query="_limit" type="integer">
+  Maximum number of runs to return
+</ParamField>
+
+<ParamField query="_offset" type="integer">
+  Number of runs to skip (for pagination)
+</ParamField>
+
+<ParamField query="pipeline_uuid" type="string">
+  Filter by specific pipeline UUID
+</ParamField>
+
+<ParamField query="pipeline_uuid[]" type="string">
+  Filter by multiple pipeline UUIDs (comma-separated)
+</ParamField>
+
+<ParamField query="status" type="string">
+  Filter by run status
+  
+  Options: `initial`, `running`, `completed`, `failed`, `cancelled`
+</ParamField>
+
+<ParamField query="status[]" type="string">
+  Filter by multiple statuses (comma-separated)
+</ParamField>
+
+<ParamField query="backfill_id" type="integer">
+  Filter by backfill ID
+</ParamField>
+
+<ParamField query="order_by[]" type="string">
+  Order results by field
+  
+  Format: `field_name asc` or `field_name desc`
+</ParamField>
+
+<ParamField query="start_timestamp" type="integer">
+  Filter runs created after this Unix timestamp
+</ParamField>
+
+<ParamField query="end_timestamp" type="integer">
+  Filter runs created before this Unix timestamp
+</ParamField>
+
+### Request Example
+
+<CodeGroup>
+
+```bash cURL
+curl -X GET "http://localhost:6789/api/pipeline_runs?pipeline_uuid=example_pipeline&status=completed" \
+  -H "API-Key: your_api_key" \
+  -H "OAUTH-TOKEN: your_access_token"
+```
+
+```python Python
+import requests
+
+url = "http://localhost:6789/api/pipeline_runs"
+headers = {
+    "API-Key": "your_api_key",
+    "OAUTH-TOKEN": "your_access_token"
+}
+params = {
+    "pipeline_uuid": "example_pipeline",
+    "status": "completed",
+    "_limit": 20
+}
+
+response = requests.get(url, headers=headers, params=params)
+runs = response.json()
+```
+
+```javascript JavaScript
+const params = new URLSearchParams({
+  pipeline_uuid: 'example_pipeline',
+  status: 'completed',
+  _limit: 20
+});
+
+const response = await fetch(
+  `http://localhost:6789/api/pipeline_runs?${params}`,
+  {
+    headers: {
+      'API-Key': 'your_api_key',
+      'OAUTH-TOKEN': 'your_access_token'
+    }
+  }
+);
+const runs = await response.json();
+```
+
+</CodeGroup>
+
+### Response
+
+<ResponseField name="pipeline_runs" type="array">
+  Array of pipeline run objects
+  
+  <ResponseField name="id" type="integer">
+    Unique identifier for the pipeline run
+  </ResponseField>
+  
+  <ResponseField name="pipeline_uuid" type="string">
+    UUID of the pipeline that was executed
+  </ResponseField>
+  
+  <ResponseField name="pipeline_schedule_id" type="integer">
+    ID of the schedule that triggered this run
+  </ResponseField>
+  
+  <ResponseField name="execution_date" type="string">
+    ISO 8601 timestamp of scheduled execution
+  </ResponseField>
+  
+  <ResponseField name="status" type="string">
+    Current status: `initial`, `running`, `completed`, `failed`, `cancelled`
+  </ResponseField>
+  
+  <ResponseField name="started_at" type="string">
+    ISO 8601 timestamp when run started
+  </ResponseField>
+  
+  <ResponseField name="completed_at" type="string">
+    ISO 8601 timestamp when run completed
+  </ResponseField>
+  
+  <ResponseField name="variables" type="object">
+    Runtime variables passed to the pipeline
+  </ResponseField>
+  
+  <ResponseField name="metrics" type="object">
+    Execution metrics and statistics
+  </ResponseField>
+  
+  <ResponseField name="block_runs" type="array">
+    Array of block run objects
+  </ResponseField>
+</ResponseField>
+
+```json Example Response
+{
+  "pipeline_runs": [
+    {
+      "id": 123,
+      "pipeline_uuid": "example_pipeline",
+      "pipeline_schedule_id": 45,
+      "execution_date": "2024-03-04T10:00:00Z",
+      "status": "completed",
+      "started_at": "2024-03-04T10:00:05Z",
+      "completed_at": "2024-03-04T10:05:30Z",
+      "variables": {
+        "env": "production",
+        "date": "2024-03-04"
+      },
+      "block_runs": [
+        {
+          "id": 456,
+          "block_uuid": "load_data",
+          "status": "completed"
+        }
+      ]
+    }
+  ]
+}
+```
+
+## Get Pipeline Run
+
+Retrieve details for a specific pipeline run.
+
+```http
+GET /api/pipeline_runs/{pipeline_run_id}
+```
+
+### Path Parameters
+
+<ParamField path="pipeline_run_id" type="integer" required>
+  The unique identifier of the pipeline run
+</ParamField>
+
+### Request Example
+
+<CodeGroup>
+
+```bash cURL
+curl -X GET "http://localhost:6789/api/pipeline_runs/123" \
+  -H "API-Key: your_api_key" \
+  -H "OAUTH-TOKEN: your_access_token"
+```
+
+```python Python
+import requests
+
+url = "http://localhost:6789/api/pipeline_runs/123"
+headers = {
+    "API-Key": "your_api_key",
+    "OAUTH-TOKEN": "your_access_token"
+}
+
+response = requests.get(url, headers=headers)
+run = response.json()
+```
+
+</CodeGroup>
+
+### Response
+
+```json
+{
+  "pipeline_run": {
+    "id": 123,
+    "pipeline_uuid": "example_pipeline",
+    "pipeline_schedule_id": 45,
+    "execution_date": "2024-03-04T10:00:00Z",
+    "status": "completed",
+    "started_at": "2024-03-04T10:00:05Z",
+    "completed_at": "2024-03-04T10:05:30Z",
+    "variables": {
+      "env": "production"
+    },
+    "metrics": {
+      "blocks_executed": 3,
+      "blocks_failed": 0,
+      "runtime_seconds": 325
+    },
+    "block_runs": [
+      {
+        "id": 456,
+        "block_uuid": "load_data",
+        "status": "completed",
+        "started_at": "2024-03-04T10:00:05Z",
+        "completed_at": "2024-03-04T10:02:00Z"
+      }
+    ]
+  }
+}
+```
+
+## Create Pipeline Run
+
+Trigger a new pipeline run.
+
+```http
+POST /api/pipeline_schedules/{pipeline_schedule_id}/pipeline_runs
+```
+
+### Path Parameters
+
+<ParamField path="pipeline_schedule_id" type="integer" required>
+  The ID of the pipeline schedule to trigger
+</ParamField>
+
+### Request Body
+
+<ParamField body="execution_date" type="string">
+  ISO 8601 timestamp for the execution date
+</ParamField>
+
+<ParamField body="variables" type="object">
+  Runtime variables to pass to the pipeline
+</ParamField>
+
+<ParamField body="event_variables" type="object">
+  Event-specific variables
+</ParamField>
+
+### Request Example
+
+<CodeGroup>
+
+```bash cURL
+curl -X POST "http://localhost:6789/api/pipeline_schedules/45/pipeline_runs" \
+  -H "API-Key: your_api_key" \
+  -H "OAUTH-TOKEN: your_access_token" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "pipeline_run": {
+      "execution_date": "2024-03-04T12:00:00Z",
+      "variables": {
+        "env": "staging",
+        "debug": true
+      }
+    }
+  }'
+```
+
+```python Python
+import requests
+from datetime import datetime
+
+url = "http://localhost:6789/api/pipeline_schedules/45/pipeline_runs"
+headers = {
+    "API-Key": "your_api_key",
+    "OAUTH-TOKEN": "your_access_token",
+    "Content-Type": "application/json"
+}
+data = {
+    "pipeline_run": {
+        "execution_date": datetime.now().isoformat(),
+        "variables": {
+            "env": "staging",
+            "debug": True
+        }
+    }
+}
+
+response = requests.post(url, headers=headers, json=data)
+run = response.json()
+```
+
+</CodeGroup>
+
+### Response
+
+```json
+{
+  "pipeline_run": {
+    "id": 124,
+    "pipeline_uuid": "example_pipeline",
+    "pipeline_schedule_id": 45,
+    "execution_date": "2024-03-04T12:00:00Z",
+    "status": "initial",
+    "variables": {
+      "env": "staging",
+      "debug": true
+    },
+    "created_at": "2024-03-04T11:55:00Z"
+  }
+}
+```
+
+## Update Pipeline Run
+
+Update a pipeline run (e.g., cancel or retry).
+
+```http
+PUT /api/pipeline_runs/{pipeline_run_id}
+```
+
+### Path Parameters
+
+<ParamField path="pipeline_run_id" type="integer" required>
+  The unique identifier of the pipeline run
+</ParamField>
+
+### Request Body
+
+<ParamField body="status" type="string">
+  Update the status (e.g., `cancelled`)
+</ParamField>
+
+<ParamField body="variables" type="object">
+  Update runtime variables
+</ParamField>
+
+### Request Example
+
+<CodeGroup>
+
+```bash Cancel Run
+curl -X PUT "http://localhost:6789/api/pipeline_runs/124" \
+  -H "API-Key: your_api_key" \
+  -H "OAUTH-TOKEN: your_access_token" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "pipeline_run": {
+      "status": "cancelled"
+    }
+  }'
+```
+
+```python Python
+import requests
+
+url = "http://localhost:6789/api/pipeline_runs/124"
+headers = {
+    "API-Key": "your_api_key",
+    "OAUTH-TOKEN": "your_access_token",
+    "Content-Type": "application/json"
+}
+data = {
+    "pipeline_run": {
+        "status": "cancelled"
+    }
+}
+
+response = requests.put(url, headers=headers, json=data)
+```
+
+</CodeGroup>
+
+### Response
+
+```json
+{
+  "pipeline_run": {
+    "id": 124,
+    "status": "cancelled",
+    "updated_at": "2024-03-04T12:10:00Z"
+  }
+}
+```
+
+## Retry Pipeline Run
+
+Retry a failed pipeline run.
+
+```http
+POST /api/pipeline_runs/{pipeline_run_id}/retry
+```
+
+### Path Parameters
+
+<ParamField path="pipeline_run_id" type="integer" required>
+  The unique identifier of the pipeline run to retry
+</ParamField>
+
+### Request Example
+
+<CodeGroup>
+
+```bash cURL
+curl -X POST "http://localhost:6789/api/pipeline_runs/123/retry" \
+  -H "API-Key: your_api_key" \
+  -H "OAUTH-TOKEN: your_access_token"
+```
+
+```python Python
+import requests
+
+url = "http://localhost:6789/api/pipeline_runs/123/retry"
+headers = {
+    "API-Key": "your_api_key",
+    "OAUTH-TOKEN": "your_access_token"
+}
+
+response = requests.post(url, headers=headers)
+retry_run = response.json()
+```
+
+</CodeGroup>
+
+## Run Status Values
+
+<CardGroup cols={2}>
+  <Card title="Initial" icon="circle">
+    Run has been created but not started
+  </Card>
+  <Card title="Running" icon="spinner">
+    Run is currently executing
+  </Card>
+  <Card title="Completed" icon="check">
+    Run finished successfully
+  </Card>
+  <Card title="Failed" icon="xmark">
+    Run encountered an error
+  </Card>
+  <Card title="Cancelled" icon="ban">
+    Run was manually cancelled
+  </Card>
+</CardGroup>
+
+## Block Runs
+
+Each pipeline run contains block runs that represent the execution of individual blocks.
+
+### Block Run Object
+
+<ResponseField name="block_run" type="object">
+  <ResponseField name="id" type="integer">
+    Unique identifier for the block run
+  </ResponseField>
+  
+  <ResponseField name="block_uuid" type="string">
+    UUID of the block that was executed
+  </ResponseField>
+  
+  <ResponseField name="pipeline_run_id" type="integer">
+    ID of the parent pipeline run
+  </ResponseField>
+  
+  <ResponseField name="status" type="string">
+    Block execution status
+  </ResponseField>
+  
+  <ResponseField name="started_at" type="string">
+    When the block started executing
+  </ResponseField>
+  
+  <ResponseField name="completed_at" type="string">
+    When the block completed
+  </ResponseField>
+  
+  <ResponseField name="metrics" type="object">
+    Block execution metrics
+  </ResponseField>
+</ResponseField>
+
+## Pipeline Run Metrics
+
+Pipeline runs include execution metrics:
+
+```json
+{
+  "metrics": {
+    "blocks_executed": 5,
+    "blocks_failed": 0,
+    "blocks_skipped": 1,
+    "runtime_seconds": 450,
+    "rows_processed": 10000,
+    "memory_usage_mb": 256
+  }
+}
+```
+
+## Error Responses
+
+### Pipeline Run Not Found
+
+```json
+{
+  "error": {
+    "code": 404,
+    "message": "Pipeline run not found"
+  }
+}
+```
+
+### Invalid Status Transition
+
+```json
+{
+  "error": {
+    "code": 400,
+    "message": "Cannot cancel a completed pipeline run"
+  }
+}
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Trigger Endpoints" icon="bolt" href="/api/rest/triggers">
+    Configure pipeline triggers and schedules
+  </Card>
+  <Card title="Pipelines" icon="diagram-project" href="/api/rest/pipelines">
+    Manage pipeline configurations
+  </Card>
+</CardGroup>

@@ -1,0 +1,636 @@
+---
+title: 'VariableManager'
+description: 'Manage pipeline variables and block outputs in Mage'
+---
+
+## Overview
+
+The `VariableManager` class handles reading and writing variables in Mage pipelines. It manages block outputs, intermediate variables, and global pipeline variables, supporting both local and cloud storage backends (S3, GCS).
+
+## Constructor
+
+```python
+VariableManager(
+    repo_path: str = None,
+    variables_dir: str = None,
+)
+```
+
+<ParamField path="repo_path" type="str">
+  Path to the repository. Defaults to current repository path.
+</ParamField>
+
+<ParamField path="variables_dir" type="str">
+  Directory where variables are stored. If starts with `s3://` or `gs://`, uses cloud storage.
+</ParamField>
+
+## Class Methods
+
+### get_manager
+
+Creates a VariableManager instance with the appropriate storage backend.
+
+```python
+@classmethod
+def get_manager(
+    repo_path: str = None,
+    variables_dir: str = None,
+) -> VariableManager
+```
+
+<ParamField path="repo_path" type="str">
+  Repository path
+</ParamField>
+
+<ParamField path="variables_dir" type="str">
+  Variables directory. Automatically selects S3VariableManager or GCSVariableManager based on prefix.
+</ParamField>
+
+<ResponseField name="return" type="VariableManager">
+  VariableManager instance (or S3VariableManager/GCSVariableManager)
+</ResponseField>
+
+**Example:**
+
+```python
+from mage_ai.data_preparation.variable_manager import VariableManager
+
+# Local storage
+manager = VariableManager.get_manager()
+
+# S3 storage
+manager = VariableManager.get_manager(
+    variables_dir='s3://my-bucket/mage-variables'
+)
+
+# GCS storage
+manager = VariableManager.get_manager(
+    variables_dir='gs://my-bucket/mage-variables'
+)
+```
+
+## Instance Methods
+
+### add_variable
+
+Stores a variable (block output) to disk or cloud storage.
+
+```python
+def add_variable(
+    pipeline_uuid: str,
+    block_uuid: str,
+    variable_uuid: str,
+    data: Any,
+    partition: str = None,
+    variable_type: VariableType = None,
+    clean_block_uuid: bool = True,
+    clean_variable_uuid: bool = True,
+    disable_variable_type_inference: bool = False,
+    input_data_types: list[InputDataType] = None,
+    resource_usage: ResourceUsage = None,
+    read_batch_settings: BatchSettings = None,
+    read_chunks: list = None,
+    write_batch_settings: BatchSettings = None,
+    write_chunks: list = None,
+) -> Variable
+```
+
+<ParamField path="pipeline_uuid" type="str" required>
+  UUID of the pipeline
+</ParamField>
+
+<ParamField path="block_uuid" type="str" required>
+  UUID of the block
+</ParamField>
+
+<ParamField path="variable_uuid" type="str" required>
+  Name of the variable (e.g., 'output_0')
+</ParamField>
+
+<ParamField path="data" type="Any" required>
+  Data to store (DataFrame, dict, list, etc.)
+</ParamField>
+
+<ParamField path="partition" type="str">
+  Partition identifier (e.g., execution date)
+</ParamField>
+
+<ParamField path="variable_type" type="VariableType">
+  Type of variable (DATAFRAME, SERIES_PANDAS, DICT, LIST, etc.)
+</ParamField>
+
+<ResponseField name="return" type="Variable">
+  Variable object representing the stored data
+</ResponseField>
+
+**Example:**
+
+```python
+import pandas as pd
+from mage_ai.data_preparation.variable_manager import VariableManager
+
+manager = VariableManager()
+
+df = pd.DataFrame({
+    'customer_id': [1, 2, 3],
+    'name': ['Alice', 'Bob', 'Charlie']
+})
+
+manager.add_variable(
+    pipeline_uuid='my_pipeline',
+    block_uuid='load_data',
+    variable_uuid='output_0',
+    data=df,
+    partition='2024_01_01'
+)
+```
+
+### get_variable
+
+Retrieves a variable (block output) from storage.
+
+```python
+def get_variable(
+    pipeline_uuid: str,
+    block_uuid: str,
+    variable_uuid: str,
+    dataframe_analysis_keys: list[str] = None,
+    partition: str = None,
+    variable_type: VariableType = None,
+    raise_exception: bool = False,
+    sample: bool = False,
+    sample_count: int = None,
+    spark: Any = None,
+    clean_block_uuid: bool = True,
+    input_data_types: list[InputDataType] = None,
+    read_batch_settings: BatchSettings = None,
+    read_chunks: list = None,
+    write_batch_settings: BatchSettings = None,
+    write_chunks: list = None,
+) -> Any
+```
+
+<ParamField path="pipeline_uuid" type="str" required>
+  UUID of the pipeline
+</ParamField>
+
+<ParamField path="block_uuid" type="str" required>
+  UUID of the block
+</ParamField>
+
+<ParamField path="variable_uuid" type="str" required>
+  Name of the variable to retrieve
+</ParamField>
+
+<ParamField path="partition" type="str">
+  Partition identifier
+</ParamField>
+
+<ParamField path="sample" type="bool" default="False">
+  Return only a sample of the data
+</ParamField>
+
+<ParamField path="sample_count" type="int">
+  Number of rows to sample
+</ParamField>
+
+<ResponseField name="return" type="Any">
+  The stored data (DataFrame, dict, list, etc.)
+</ResponseField>
+
+**Example:**
+
+```python
+manager = VariableManager()
+
+df = manager.get_variable(
+    pipeline_uuid='my_pipeline',
+    block_uuid='load_data',
+    variable_uuid='output_0',
+    partition='2024_01_01'
+)
+
+print(f"Retrieved {len(df)} rows")
+```
+
+### get_variable_object
+
+Returns a Variable object without loading the data.
+
+```python
+def get_variable_object(
+    pipeline_uuid: str,
+    block_uuid: str,
+    variable_uuid: str = None,
+    partition: str = None,
+    variable_type: VariableType = None,
+    clean_block_uuid: bool = True,
+    spark=None,
+) -> Variable
+```
+
+<ResponseField name="return" type="Variable">
+  Variable object that can be used to read data, check metadata, etc.
+</ResponseField>
+
+**Example:**
+
+```python
+manager = VariableManager()
+
+var = manager.get_variable_object(
+    pipeline_uuid='my_pipeline',
+    block_uuid='load_data',
+    variable_uuid='output_0'
+)
+
+print(f"Variable path: {var.variable_path}")
+print(f"Variable type: {var.variable_type}")
+
+# Load data when needed
+data = var.read_data()
+```
+
+### delete_variable
+
+Deletes a stored variable.
+
+```python
+def delete_variable(
+    pipeline_uuid: str,
+    block_uuid: str,
+    variable_uuid: str,
+    partition: str = None,
+    variable_type: VariableType = None,
+    clean_block_uuid: bool = True,
+) -> None
+```
+
+**Example:**
+
+```python
+manager.delete_variable(
+    pipeline_uuid='my_pipeline',
+    block_uuid='load_data',
+    variable_uuid='output_0',
+    partition='2024_01_01'
+)
+```
+
+### get_variables_by_block
+
+Returns all variable names for a specific block.
+
+```python
+def get_variables_by_block(
+    pipeline_uuid: str,
+    block_uuid: str,
+    partition: str = None,
+    clean_block_uuid: bool = True,
+    max_results: int = None,
+    output_variable_only: bool = None,
+) -> list[str]
+```
+
+<ResponseField name="return" type="list[str]">
+  List of variable UUIDs for the block
+</ResponseField>
+
+**Example:**
+
+```python
+manager = VariableManager()
+
+variables = manager.get_variables_by_block(
+    pipeline_uuid='my_pipeline',
+    block_uuid='transform_data',
+    partition='2024_01_01'
+)
+
+print(f"Block outputs: {variables}")
+# Output: ['output_0', 'output_1']
+```
+
+### get_variables_by_pipeline
+
+Returns all variables for all blocks in a pipeline.
+
+```python
+def get_variables_by_pipeline(
+    pipeline_uuid: str
+) -> dict[str, list[str]]
+```
+
+<ResponseField name="return" type="dict[str, list[str]]">
+  Dictionary mapping block UUIDs to lists of variable names
+</ResponseField>
+
+**Example:**
+
+```python
+manager = VariableManager()
+
+variables_by_block = manager.get_variables_by_pipeline('my_pipeline')
+
+for block_uuid, variables in variables_by_block.items():
+    print(f"{block_uuid}: {variables}")
+
+# Output:
+# load_data: ['output_0']
+# transform_data: ['output_0', 'output_1']
+# export_data: []
+```
+
+### clean_variables
+
+Removes old variables based on retention period.
+
+```python
+def clean_variables(
+    pipeline_uuid: str = None
+) -> None
+```
+
+<ParamField path="pipeline_uuid" type="str">
+  If specified, clean only this pipeline's variables. Otherwise, clean all pipelines.
+</ParamField>
+
+**Example:**
+
+```python
+manager = VariableManager()
+
+# Clean specific pipeline
+manager.clean_variables(pipeline_uuid='my_pipeline')
+
+# Clean all pipelines
+manager.clean_variables()
+```
+
+## Helper Functions
+
+### get_global_variables
+
+Retrieves all global variables for a pipeline.
+
+```python
+def get_global_variables(
+    pipeline_uuid: str,
+    pipeline: Pipeline = None,
+    context_data: dict = None,
+    repo_path: str = None,
+    variables_dir: str = None,
+) -> dict[str, Any]
+```
+
+<ResponseField name="return" type="dict[str, Any]">
+  Dictionary of global variable names to values
+</ResponseField>
+
+**Example:**
+
+```python
+from mage_ai.data_preparation.variable_manager import get_global_variables
+
+global_vars = get_global_variables('my_pipeline')
+
+print(f"Environment: {global_vars.get('env')}")
+print(f"API Key: {global_vars.get('api_key')}")
+```
+
+### get_global_variable
+
+Retrieves a specific global variable.
+
+```python
+def get_global_variable(
+    pipeline_uuid: str,
+    key: str,
+) -> Any
+```
+
+**Example:**
+
+```python
+from mage_ai.data_preparation.variable_manager import get_global_variable
+
+api_key = get_global_variable('my_pipeline', 'api_key')
+```
+
+### set_global_variable
+
+Sets a global variable value.
+
+```python
+def set_global_variable(
+    pipeline_uuid: str,
+    key: str,
+    value: Any,
+    repo_path: str = None,
+) -> None
+```
+
+**Example:**
+
+```python
+from mage_ai.data_preparation.variable_manager import set_global_variable
+
+set_global_variable(
+    'my_pipeline',
+    'last_run_date',
+    '2024-01-01'
+)
+```
+
+### delete_global_variable
+
+Deletes a global variable.
+
+```python
+def delete_global_variable(
+    pipeline_uuid: str,
+    key: str,
+    repo_path: str = None,
+) -> None
+```
+
+**Example:**
+
+```python
+from mage_ai.data_preparation.variable_manager import delete_global_variable
+
+delete_global_variable('my_pipeline', 'temp_variable')
+```
+
+### get_variable
+
+Helper function to get a block variable.
+
+```python
+def get_variable(
+    pipeline_uuid: str,
+    block_uuid: str,
+    key: str,
+    **kwargs
+) -> Any
+```
+
+**Example:**
+
+```python
+from mage_ai.data_preparation.variable_manager import get_variable
+
+data = get_variable(
+    'my_pipeline',
+    'load_data',
+    'output_0',
+    partition='2024_01_01'
+)
+```
+
+## Complete Examples
+
+### Storing and Retrieving Variables
+
+```python
+from mage_ai.data_preparation.variable_manager import VariableManager
+import pandas as pd
+
+# Initialize manager
+manager = VariableManager()
+
+# Store a dataframe
+df = pd.DataFrame({
+    'id': [1, 2, 3],
+    'value': [100, 200, 300]
+})
+
+manager.add_variable(
+    pipeline_uuid='analytics_pipeline',
+    block_uuid='load_sales',
+    variable_uuid='output_0',
+    data=df,
+    partition='2024_01_01'
+)
+
+print("Variable stored successfully")
+
+# Retrieve the dataframe
+retrieved_df = manager.get_variable(
+    pipeline_uuid='analytics_pipeline',
+    block_uuid='load_sales',
+    variable_uuid='output_0',
+    partition='2024_01_01'
+)
+
+print(f"Retrieved {len(retrieved_df)} rows")
+print(retrieved_df)
+```
+
+### Working with Multiple Variables
+
+```python
+from mage_ai.data_preparation.variable_manager import VariableManager
+import pandas as pd
+
+manager = VariableManager()
+pipeline_uuid = 'my_pipeline'
+block_uuid = 'process_data'
+partition = '2024_01_01'
+
+# Store multiple outputs
+df1 = pd.DataFrame({'col1': [1, 2, 3]})
+df2 = pd.DataFrame({'col2': [4, 5, 6]})
+metadata = {'row_count': 3, 'status': 'success'}
+
+manager.add_variable(pipeline_uuid, block_uuid, 'output_0', df1, partition=partition)
+manager.add_variable(pipeline_uuid, block_uuid, 'output_1', df2, partition=partition)
+manager.add_variable(pipeline_uuid, block_uuid, 'metadata', metadata, partition=partition)
+
+# List all variables for the block
+variables = manager.get_variables_by_block(
+    pipeline_uuid,
+    block_uuid,
+    partition=partition
+)
+
+print(f"Stored variables: {variables}")
+# Output: ['output_0', 'output_1', 'metadata']
+
+# Retrieve each variable
+for var_name in variables:
+    data = manager.get_variable(
+        pipeline_uuid,
+        block_uuid,
+        var_name,
+        partition=partition
+    )
+    print(f"{var_name}: {type(data).__name__}")
+```
+
+### Using Cloud Storage (S3)
+
+```python
+from mage_ai.data_preparation.variable_manager import VariableManager
+import pandas as pd
+
+# Use S3 for variable storage
+manager = VariableManager.get_manager(
+    variables_dir='s3://my-mage-bucket/variables'
+)
+
+# Store to S3
+df = pd.DataFrame({'data': [1, 2, 3]})
+
+manager.add_variable(
+    pipeline_uuid='cloud_pipeline',
+    block_uuid='etl_block',
+    variable_uuid='output_0',
+    data=df
+)
+
+print("Data stored to S3")
+
+# Retrieve from S3
+retrieved = manager.get_variable(
+    pipeline_uuid='cloud_pipeline',
+    block_uuid='etl_block',
+    variable_uuid='output_0'
+)
+
+print(f"Retrieved from S3: {len(retrieved)} rows")
+```
+
+### Managing Global Variables
+
+```python
+from mage_ai.data_preparation.variable_manager import (
+    get_global_variables,
+    set_global_variable,
+    get_global_variable,
+)
+
+pipeline_uuid = 'my_pipeline'
+
+# Set global variables
+set_global_variable(pipeline_uuid, 'environment', 'production')
+set_global_variable(pipeline_uuid, 'api_key', 'secret_key_123')
+set_global_variable(pipeline_uuid, 'max_retries', 3)
+
+# Get all global variables
+all_globals = get_global_variables(pipeline_uuid)
+print(f"All global variables: {all_globals}")
+
+# Get specific global variable
+env = get_global_variable(pipeline_uuid, 'environment')
+print(f"Environment: {env}")
+
+# Use in block execution
+@data_loader
+def load_data(*args, **kwargs):
+    env = kwargs.get('environment')
+    api_key = kwargs.get('api_key')
+    
+    print(f"Running in {env} with key {api_key}")
+    return data
+```

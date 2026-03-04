@@ -1,0 +1,326 @@
+---
+title: 'dbt Integration'
+description: 'Use dbt models within Mage pipelines for powerful data transformations'
+icon: 'database'
+---
+
+## Overview
+
+Mage provides native integration with [dbt (data build tool)](https://www.getdbt.com/), allowing you to run dbt models, tests, and snapshots directly within your Mage pipelines. This integration combines Mage's orchestration capabilities with dbt's SQL-based transformation framework.
+
+## Installation
+
+Install Mage with dbt support using the `dbt` extra:
+
+```bash
+pip install mage-ai[dbt]
+```
+
+This installs the following dbt adapters (from setup.py:70-83):
+
+- dbt-core 1.8.7
+- dbt-bigquery 1.8.3
+- dbt-clickhouse 1.8.5
+- dbt-duckdb 1.8.4
+- dbt-postgres 1.8.2
+- dbt-redshift 1.8.1
+- dbt-snowflake 1.8.4
+- dbt-spark 1.8.0
+- dbt-sqlserver 1.8.4
+- dbt-synapse 1.8.2
+- dbt-trino 1.8.4
+
+## Project Structure
+
+Mage expects dbt projects to be located in a `dbt/` directory within your Mage repository:
+
+```
+your_mage_project/
+├── dbt/
+│   ├── your_dbt_project/
+│   │   ├── models/
+│   │   ├── tests/
+│   │   ├── dbt_project.yml
+│   │   └── profiles.yml
+├── pipelines/
+└── ...
+```
+
+The base project path is automatically resolved to `{repo_path}/dbt` (block.py:42-50).
+
+## Creating dbt Blocks
+
+<Steps>
+  <Step title="Initialize dbt project">
+    Create a dbt project in the `dbt/` directory or import an existing one.
+  </Step>
+  
+  <Step title="Configure profiles">
+    Set up your `profiles.yml` with connection credentials for your data warehouse.
+    
+    <Tabs>
+      <Tab title="Snowflake">
+        ```yaml
+        your_project:
+          target: dev
+          outputs:
+            dev:
+              type: snowflake
+              account: your_account
+              user: your_user
+              password: "{{ env_var('SNOWFLAKE_PASSWORD') }}"
+              role: your_role
+              database: your_database
+              warehouse: your_warehouse
+              schema: your_schema
+              threads: 4
+        ```
+      </Tab>
+      
+      <Tab title="BigQuery">
+        ```yaml
+        your_project:
+          target: dev
+          outputs:
+            dev:
+              type: bigquery
+              method: service-account
+              project: your_gcp_project
+              dataset: your_dataset
+              keyfile: /path/to/keyfile.json
+              threads: 4
+        ```
+      </Tab>
+      
+      <Tab title="Postgres">
+        ```yaml
+        your_project:
+          target: dev
+          outputs:
+            dev:
+              type: postgres
+              host: localhost
+              port: 5432
+              user: your_user
+              password: "{{ env_var('POSTGRES_PASSWORD') }}"
+              dbname: your_database
+              schema: your_schema
+              threads: 4
+        ```
+      </Tab>
+    </Tabs>
+  </Step>
+  
+  <Step title="Add dbt block to pipeline">
+    In Mage, add a dbt block by selecting "DBT model" as the block type. You can choose between SQL and YAML blocks.
+  </Step>
+</Steps>
+
+## Block Types
+
+Mage supports two types of dbt blocks:
+
+### SQL Blocks
+
+SQL blocks execute dbt models written in SQL:
+
+```yaml
+block_type: dbt
+language: sql
+configuration:
+  dbt_profile_target: dev
+  dbt_project_name: your_project
+```
+
+### YAML Blocks
+
+YAML blocks execute dbt commands defined in YAML configuration:
+
+```yaml
+block_type: dbt
+language: yaml
+configuration:
+  dbt:
+    command: run
+    models:
+      - model_name
+```
+
+## Configuration
+
+Configure dbt blocks using the `configuration` dictionary (block.py:57-65):
+
+```python
+{
+  "dbt": {
+    "command": "run",           # dbt command: run, test, build, snapshot
+    "models": ["model_name"],   # Specific models to run
+    "exclude": [],               # Models to exclude
+  },
+  "dbt_profile_target": "dev",  # Target from profiles.yml
+  "dbt_project_name": "your_project"
+}
+```
+
+### Dynamic Target Selection
+
+You can dynamically select the dbt target using Jinja templating (block.py:67-77):
+
+```yaml
+configuration:
+  dbt_profile_target: "{{ 'prod' if env == 'production' else 'dev' }}"
+```
+
+## Running dbt Commands
+
+<CodeGroup>
+```python dbt run
+# Executes dbt models
+@dbt_block
+def run_dbt_models():
+    return dict(
+        command='run',
+        models=['customers', 'orders']
+    )
+```
+
+```python dbt test
+# Runs dbt tests
+@dbt_block
+def test_dbt_models():
+    return dict(
+        command='test',
+        models=['customers']
+    )
+```
+
+```python dbt build
+# Runs models and tests together
+@dbt_block
+def build_dbt_project():
+    return dict(
+        command='build',
+        select='tag:daily'
+    )
+```
+</CodeGroup>
+
+## Upstream Block Integration
+
+Mage automatically manages dependencies between dbt blocks and non-dbt blocks using dbt sources (block.py:89-117):
+
+```sql
+-- models/customers.sql
+-- This model depends on a Mage data loader block
+SELECT *
+FROM {{ source('mage', 'raw_customers') }}
+WHERE created_at >= CURRENT_DATE - 7
+```
+
+When you add a non-dbt block as an upstream dependency, Mage automatically updates the dbt sources configuration.
+
+## Passing Variables
+
+Pass variables from Mage to dbt using the variables parameter (block.py:120-146):
+
+```python
+@data_loader
+def load_data(*args, **kwargs):
+    return dict(
+        start_date='2024-01-01',
+        end_date='2024-12-31'
+    )
+
+@dbt_block
+def transform_with_variables(data, *args, **kwargs):
+    # Variables are automatically passed to dbt
+    # Access in dbt with {{ var('start_date') }}
+    return dict(
+        command='run',
+        vars=data
+    )
+```
+
+Mage automatically serializes supported variable types (str, int, bool, float, dict, list, datetime) to JSON format for dbt consumption.
+
+## Testing
+
+Mage integrates with dbt's native testing framework. Tests are executed automatically when you run dbt blocks with the `test` or `build` commands (block.py:79-87).
+
+<Note>
+  Mage skips the standard block test execution for dbt blocks since dbt handles testing internally.
+</Note>
+
+## Best Practices
+
+<Steps>
+  <Step title="Organize dbt models by stage">
+    Structure your dbt project with staging, intermediate, and mart layers for clear data lineage.
+  </Step>
+  
+  <Step title="Use incremental models for large datasets">
+    Leverage dbt's incremental models to process only new or updated records.
+  </Step>
+  
+  <Step title="Parameterize targets">
+    Use Mage variables to dynamically select dbt targets based on environment.
+  </Step>
+  
+  <Step title="Combine with Mage blocks">
+    Use Mage data loaders for API ingestion and dbt for SQL transformations.
+  </Step>
+</Steps>
+
+## Example Pipeline
+
+```yaml
+blocks:
+  - uuid: extract_raw_data
+    type: data_loader
+    language: python
+    
+  - uuid: transform_customers
+    type: dbt
+    language: sql
+    upstream_blocks:
+      - extract_raw_data
+    configuration:
+      dbt_profile_target: "{{ env }}"
+      dbt:
+        command: run
+        models:
+          - customers
+          
+  - uuid: test_transformations
+    type: dbt
+    language: yaml
+    upstream_blocks:
+      - transform_customers
+    configuration:
+      dbt:
+        command: test
+```
+
+<Warning>
+  Ensure your dbt profiles.yml credentials are properly secured using environment variables or Mage's secret management.
+</Warning>
+
+## Troubleshooting
+
+### Profile not found
+
+Ensure `profiles.yml` exists in your dbt project directory and the profile name matches your `dbt_project.yml`.
+
+### Model compilation errors
+
+Check that all upstream dependencies are properly configured as dbt sources or refs.
+
+### Connection errors
+
+Verify your warehouse credentials in `profiles.yml` and ensure network connectivity to your data warehouse.
+
+## Additional Resources
+
+- [dbt Documentation](https://docs.getdbt.com/)
+- [dbt Best Practices](https://docs.getdbt.com/guides/best-practices)
+- [Mage Variables](/development/variables)

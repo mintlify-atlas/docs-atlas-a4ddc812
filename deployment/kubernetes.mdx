@@ -1,0 +1,701 @@
+---
+title: 'Kubernetes Deployment'
+description: 'Deploy Mage on Kubernetes clusters with high availability and scalability'
+keywords: ['kubernetes', 'k8s', 'deployment', 'helm', 'production']
+---
+
+Deploy Mage on Kubernetes for production-grade orchestration with high availability, auto-scaling, and enterprise features. This guide covers basic Pod deployments, Deployments with persistent storage, and RBAC configuration.
+
+## Prerequisites
+
+<Info>
+  Before deploying Mage on Kubernetes, ensure you have:
+  - A running Kubernetes cluster (v1.19+)
+  - `kubectl` configured to access your cluster
+  - Persistent storage provisioner configured
+  - Basic understanding of Kubernetes concepts
+</Info>
+
+## Quick Start
+
+Deploy Mage with a basic configuration:
+
+```bash
+kubectl apply -f https://raw.githubusercontent.com/mage-ai/mage-ai/master/kube/app.yaml
+```
+
+<Warning>
+  The quick start configuration is for testing only. Update the volume path and configure persistent storage for production use.
+</Warning>
+
+## Kubernetes Manifests
+
+### Basic Pod Deployment
+
+Here's the complete manifest from Mage's source code:
+
+```yaml app.yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: mage-user
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  namespace: default
+  name: job-manager
+rules:
+- apiGroups: [""] # "" indicates the core API group
+  resources: ["pods"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: ["batch", "extensions"]
+  resources: ["jobs", "jobs/status"]
+  verbs: ["create", "delete", "get"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: mage-job-manager
+  namespace: default
+subjects:
+- kind: ServiceAccount
+  name: mage-user
+  namespace: default
+roleRef:
+  kind: Role
+  name: job-manager
+  apiGroup: rbac.authorization.k8s.io
+
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: mage-server
+spec:
+  containers:
+  - name: mage-server
+    image: mageai/mageai:latest
+    ports:
+    - containerPort: 6789
+    volumeMounts:
+    - name: mage-fs
+      mountPath: /home/src
+    env:
+      - name: KUBE_NAMESPACE
+        valueFrom:
+          fieldRef:
+            fieldPath: metadata.namespace
+  volumes:
+  - name: mage-fs
+    hostPath:
+      path: /path/to/mage_project
+  serviceAccountName: mage-user
+```
+
+<Steps>
+  <Step title="Update the volume path">
+    Change `/path/to/mage_project` to your actual project path or configure a PersistentVolume.
+  </Step>
+  <Step title="Apply the manifest">
+    ```bash
+    kubectl apply -f app.yaml
+    ```
+  </Step>
+  <Step title="Check pod status">
+    ```bash
+    kubectl get pods
+    kubectl logs mage-server
+    ```
+  </Step>
+  <Step title="Port forward to access">
+    ```bash
+    kubectl port-forward pod/mage-server 6789:6789
+    ```
+    Access at `http://localhost:6789`
+  </Step>
+</Steps>
+
+## Production Deployment with Persistent Volumes
+
+For production, use a Deployment with PersistentVolumeClaim:
+
+```yaml mage-deployment.yaml
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: mage
+
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: mage-user
+  namespace: mage
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  namespace: mage
+  name: job-manager
+rules:
+- apiGroups: [""]
+  resources: ["pods"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: ["batch", "extensions"]
+  resources: ["jobs", "jobs/status"]
+  verbs: ["create", "delete", "get", "list", "watch"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: mage-job-manager
+  namespace: mage
+subjects:
+- kind: ServiceAccount
+  name: mage-user
+  namespace: mage
+roleRef:
+  kind: Role
+  name: job-manager
+  apiGroup: rbac.authorization.k8s.io
+
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: mage-data-pvc
+  namespace: mage
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+  storageClassName: standard  # Adjust based on your cluster
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mage-config
+  namespace: mage
+data:
+  MAGE_DATA_DIR: "/home/src/mage_data"
+  SCHEDULER_TRIGGER_INTERVAL: "10"
+  SERVER_VERBOSITY: "info"
+  REQUIRE_USER_AUTHENTICATION: "True"
+  AUTHENTICATION_MODE: "LOCAL"
+
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: mage-secrets
+  namespace: mage
+type: Opaque
+stringData:
+  DATABASE_CONNECTION_URL: "postgresql://user:password@postgres-service:5432/mage"
+  # Add other secrets here
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mage-server
+  namespace: mage
+spec:
+  replicas: 1  # Use 1 for now, increase for HA
+  selector:
+    matchLabels:
+      app: mage-server
+  template:
+    metadata:
+      labels:
+        app: mage-server
+    spec:
+      serviceAccountName: mage-user
+      containers:
+      - name: mage-server
+        image: mageai/mageai:latest
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 6789
+          name: http
+        - containerPort: 7789
+          name: websocket
+        env:
+        - name: KUBE_NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+        envFrom:
+        - configMapRef:
+            name: mage-config
+        - secretRef:
+            name: mage-secrets
+        volumeMounts:
+        - name: mage-data
+          mountPath: /home/src
+        resources:
+          requests:
+            memory: "1Gi"
+            cpu: "500m"
+          limits:
+            memory: "4Gi"
+            cpu: "2000m"
+        livenessProbe:
+          httpGet:
+            path: /api/statuses
+            port: 6789
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /api/statuses
+            port: 6789
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 3
+      volumes:
+      - name: mage-data
+        persistentVolumeClaim:
+          claimName: mage-data-pvc
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mage-server
+  namespace: mage
+spec:
+  selector:
+    app: mage-server
+  ports:
+  - name: http
+    port: 6789
+    targetPort: 6789
+    protocol: TCP
+  - name: websocket
+    port: 7789
+    targetPort: 7789
+    protocol: TCP
+  type: LoadBalancer  # Change to ClusterIP if using Ingress
+```
+
+Deploy with:
+
+```bash
+kubectl apply -f mage-deployment.yaml
+```
+
+## Ingress Configuration
+
+Expose Mage via Ingress for HTTPS and domain routing:
+
+```yaml mage-ingress.yaml
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: mage-ingress
+  namespace: mage
+  annotations:
+    kubernetes.io/ingress.class: nginx
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    nginx.ingress.kubernetes.io/proxy-body-size: "50m"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+spec:
+  tls:
+  - hosts:
+    - mage.yourdomain.com
+    secretName: mage-tls
+  rules:
+  - host: mage.yourdomain.com
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: mage-server
+            port:
+              number: 6789
+```
+
+<Tip>
+  Configure cert-manager for automatic TLS certificate management with Let's Encrypt.
+</Tip>
+
+## PostgreSQL Database on Kubernetes
+
+Deploy PostgreSQL alongside Mage:
+
+```yaml postgres.yaml
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: postgres-pvc
+  namespace: mage
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 20Gi
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres
+  namespace: mage
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgres
+  template:
+    metadata:
+      labels:
+        app: postgres
+    spec:
+      containers:
+      - name: postgres
+        image: pgvector/pgvector:0.6.0-pg16
+        ports:
+        - containerPort: 5432
+        env:
+        - name: POSTGRES_DB
+          value: mage
+        - name: POSTGRES_USER
+          value: mageuser
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: postgres-secret
+              key: password
+        volumeMounts:
+        - name: postgres-storage
+          mountPath: /var/lib/postgresql/data
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "250m"
+          limits:
+            memory: "2Gi"
+            cpu: "1000m"
+      volumes:
+      - name: postgres-storage
+        persistentVolumeClaim:
+          claimName: postgres-pvc
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres-service
+  namespace: mage
+spec:
+  selector:
+    app: postgres
+  ports:
+  - port: 5432
+    targetPort: 5432
+  type: ClusterIP
+
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: postgres-secret
+  namespace: mage
+type: Opaque
+stringData:
+  password: "your-secure-password-here"
+```
+
+## Configuration Management
+
+<Tabs>
+  <Tab title="ConfigMap">
+    Store non-sensitive configuration:
+    
+    ```yaml
+    apiVersion: v1
+    kind: ConfigMap
+    metadata:
+      name: mage-config
+      namespace: mage
+    data:
+      MAGE_DATA_DIR: "/home/src/mage_data"
+      SCHEDULER_TRIGGER_INTERVAL: "10"
+      SERVER_VERBOSITY: "info"
+      ENABLE_PROMETHEUS: "True"
+    ```
+  </Tab>
+  <Tab title="Secrets">
+    Store sensitive data securely:
+    
+    ```yaml
+    apiVersion: v1
+    kind: Secret
+    metadata:
+      name: mage-secrets
+      namespace: mage
+    type: Opaque
+    stringData:
+      DATABASE_CONNECTION_URL: "postgresql://user:pass@host:5432/mage"
+      AWS_ACCESS_KEY_ID: "your-access-key"
+      AWS_SECRET_ACCESS_KEY: "your-secret-key"
+    ```
+  </Tab>
+  <Tab title="Environment Variables">
+    Reference in your deployment:
+    
+    ```yaml
+    spec:
+      containers:
+      - name: mage-server
+        envFrom:
+        - configMapRef:
+            name: mage-config
+        - secretRef:
+            name: mage-secrets
+        env:
+        - name: KUBE_NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+    ```
+  </Tab>
+</Tabs>
+
+## RBAC Configuration
+
+The Mage service account needs permissions to manage Kubernetes jobs for pipeline execution:
+
+```yaml rbac.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  namespace: mage
+  name: job-manager
+rules:
+# Pod permissions for monitoring
+- apiGroups: [""]
+  resources: ["pods"]
+  verbs: ["get", "list", "watch"]
+# Job permissions for pipeline execution
+- apiGroups: ["batch", "extensions"]
+  resources: ["jobs", "jobs/status"]
+  verbs: ["create", "delete", "get", "list", "watch", "patch", "update"]
+```
+
+<Info>
+  Mage uses Kubernetes Jobs to execute pipeline blocks. The service account needs job creation and management permissions.
+</Info>
+
+## Scaling Considerations
+
+<Warning>
+  Mage is currently designed to run as a single replica due to state management. For high availability, use:
+  - Readiness/liveness probes for automatic recovery
+  - Persistent volumes for data durability
+  - Database for metadata storage
+  - Load balancer health checks
+</Warning>
+
+### Resource Recommendations
+
+| Environment | CPU | Memory | Storage |
+| ----------- | --- | ------ | ------- |
+| Development | 500m | 1Gi | 5Gi |
+| Production (Small) | 1000m | 2Gi | 20Gi |
+| Production (Medium) | 2000m | 4Gi | 50Gi |
+| Production (Large) | 4000m | 8Gi | 100Gi |
+
+## Monitoring and Health Checks
+
+### Liveness Probe
+
+Detects if the container is alive:
+
+```yaml
+livenessProbe:
+  httpGet:
+    path: /api/statuses
+    port: 6789
+  initialDelaySeconds: 30
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 3
+```
+
+### Readiness Probe
+
+Detects if the container is ready to serve traffic:
+
+```yaml
+readinessProbe:
+  httpGet:
+    path: /api/statuses
+    port: 6789
+  initialDelaySeconds: 10
+  periodSeconds: 5
+  timeoutSeconds: 3
+  failureThreshold: 3
+```
+
+## Storage Classes
+
+<Tabs>
+  <Tab title="AWS EBS">
+    ```yaml
+    apiVersion: storage.k8s.io/v1
+    kind: StorageClass
+    metadata:
+      name: mage-storage
+    provisioner: kubernetes.io/aws-ebs
+    parameters:
+      type: gp3
+      fsType: ext4
+    ```
+  </Tab>
+  <Tab title="GCP Persistent Disk">
+    ```yaml
+    apiVersion: storage.k8s.io/v1
+    kind: StorageClass
+    metadata:
+      name: mage-storage
+    provisioner: kubernetes.io/gce-pd
+    parameters:
+      type: pd-ssd
+      replication-type: regional-pd
+    ```
+  </Tab>
+  <Tab title="Azure Disk">
+    ```yaml
+    apiVersion: storage.k8s.io/v1
+    kind: StorageClass
+    metadata:
+      name: mage-storage
+    provisioner: kubernetes.io/azure-disk
+    parameters:
+      storageaccounttype: Premium_LRS
+      kind: Managed
+    ```
+  </Tab>
+</Tabs>
+
+## Useful Commands
+
+<CodeGroup>
+
+```bash Deploy
+kubectl apply -f mage-deployment.yaml
+```
+
+```bash Check status
+kubectl get all -n mage
+```
+
+```bash View logs
+kubectl logs -f deployment/mage-server -n mage
+```
+
+```bash Port forward
+kubectl port-forward -n mage svc/mage-server 6789:6789
+```
+
+```bash Execute command in pod
+kubectl exec -it -n mage deployment/mage-server -- bash
+```
+
+```bash Delete deployment
+kubectl delete -f mage-deployment.yaml
+```
+
+</CodeGroup>
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="Pod stuck in Pending">
+    Check PVC status and storage provisioner:
+    
+    ```bash
+    kubectl get pvc -n mage
+    kubectl describe pvc mage-data-pvc -n mage
+    ```
+    
+    Verify storage class exists:
+    
+    ```bash
+    kubectl get storageclass
+    ```
+  </Accordion>
+  <Accordion title="Permission errors creating jobs">
+    Verify RBAC is configured:
+    
+    ```bash
+    kubectl get role,rolebinding -n mage
+    kubectl describe role job-manager -n mage
+    ```
+    
+    Check service account:
+    
+    ```bash
+    kubectl get sa mage-user -n mage
+    ```
+  </Accordion>
+  <Accordion title="Database connection failed">
+    Test database connectivity from pod:
+    
+    ```bash
+    kubectl exec -it -n mage deployment/mage-server -- \
+      psql postgresql://user:pass@postgres-service:5432/mage
+    ```
+    
+    Verify secret is mounted correctly:
+    
+    ```bash
+    kubectl exec -it -n mage deployment/mage-server -- \
+      env | grep DATABASE
+    ```
+  </Accordion>
+  <Accordion title="Container restarts frequently">
+    Check resource limits and logs:
+    
+    ```bash
+    kubectl top pod -n mage
+    kubectl logs -n mage deployment/mage-server --previous
+    ```
+    
+    Increase memory/CPU limits if needed.
+  </Accordion>
+</AccordionGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Cloud Providers" icon="cloud" href="/deployment/cloud-providers">
+    Deploy to managed Kubernetes services (EKS, GKE, AKS)
+  </Card>
+  <Card title="Configuration" icon="gear" href="/deployment/configuration">
+    Advanced configuration options
+  </Card>
+  <Card title="Docker" icon="docker" href="/deployment/docker">
+    Simple Docker deployment
+  </Card>
+  <Card title="Monitoring" icon="chart-line" href="/deployment/configuration">
+    Set up Prometheus monitoring
+  </Card>
+</CardGroup>

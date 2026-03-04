@@ -1,0 +1,769 @@
+---
+title: "Testing Strategies"
+description: "Comprehensive testing approaches for reliable Mage data pipelines"
+---
+
+## Overview
+
+Testing is essential for maintaining reliable data pipelines. Mage provides built-in testing capabilities and integrates with standard Python testing frameworks.
+
+## Block-Level Testing
+
+### Test Decorator
+
+Mage provides the `@test` decorator for inline block tests:
+
+```python
+from mage_ai.data_preparation.decorators import data_loader, test
+import pandas as pd
+
+@data_loader
+def load_customer_data(*args, **kwargs):
+    """Load customer data from source."""
+    return pd.read_csv('customers.csv')
+
+@test
+def test_output_not_empty(output, *args) -> None:
+    """
+    Test that the output is not empty.
+    """
+    assert output is not None, 'Output is undefined'
+    assert len(output) > 0, 'Output DataFrame is empty'
+
+@test
+def test_required_columns(output, *args) -> None:
+    """
+    Test that all required columns are present.
+    """
+    required_columns = ['customer_id', 'name', 'email', 'created_at']
+    missing = [col for col in required_columns if col not in output.columns]
+    assert not missing, f'Missing required columns: {missing}'
+
+@test
+def test_no_duplicate_ids(output, *args) -> None:
+    """
+    Test that customer IDs are unique.
+    """
+    duplicates = output['customer_id'].duplicated().sum()
+    assert duplicates == 0, f'Found {duplicates} duplicate customer IDs'
+
+@test
+def test_email_format(output, *args) -> None:
+    """
+    Test that emails are valid.
+    """
+    import re
+    email_pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+    
+    invalid_emails = output[~output['email'].str.match(email_pattern)]
+    assert len(invalid_emails) == 0, f'Found {len(invalid_emails)} invalid emails'
+```
+
+<Note>
+Test functions receive the block's output as the first parameter. Tests run automatically after block execution when `run_tests=True` (default behavior).
+</Note>
+
+### Test Execution
+
+Tests are executed by the block execution engine:
+
+```python
+# From mage_ai/data_preparation/models/block/__init__.py
+if run_tests:
+    block.run_tests(
+        build_block_output_stdout=build_block_output_stdout,
+        global_vars=global_vars,
+        update_tests=False,  # Don't update stored test results
+    )
+```
+
+<Tip>
+**Test execution modes:**
+- Interactive mode: Run tests manually via UI
+- Pipeline execution: Automatic with `run_tests=True`
+- Notebook mode: Run via `block.run_tests()`
+</Tip>
+
+## Data Quality Tests
+
+### Schema Validation
+
+```python
+from mage_ai.data_preparation.decorators import test
+import pandas as pd
+
+@test
+def test_schema_matches_expected(output, *args) -> None:
+    """
+    Validate DataFrame schema against expectations.
+    """
+    expected_schema = {
+        'customer_id': 'int64',
+        'name': 'object',
+        'email': 'object',
+        'created_at': 'datetime64[ns]',
+        'total_spent': 'float64',
+        'is_active': 'bool',
+    }
+    
+    for column, expected_dtype in expected_schema.items():
+        assert column in output.columns, f'Missing column: {column}'
+        
+        actual_dtype = str(output[column].dtype)
+        assert actual_dtype == expected_dtype, \
+            f'Column {column} has type {actual_dtype}, expected {expected_dtype}'
+```
+
+### Null Value Checks
+
+```python
+@test
+def test_no_nulls_in_required_fields(output, *args) -> None:
+    """
+    Ensure required fields have no null values.
+    """
+    required_fields = ['customer_id', 'name', 'created_at']
+    
+    for field in required_fields:
+        null_count = output[field].isna().sum()
+        assert null_count == 0, \
+            f'Field {field} has {null_count} null values'
+
+@test
+def test_null_percentage_within_limits(output, *args) -> None:
+    """
+    Ensure null percentages are acceptable.
+    """
+    max_null_pct = 5.0  # 5% threshold
+    
+    for column in output.columns:
+        null_pct = (output[column].isna().sum() / len(output)) * 100
+        assert null_pct <= max_null_pct, \
+            f'Column {column} has {null_pct:.1f}% nulls (limit: {max_null_pct}%)'
+```
+
+### Business Rule Validation
+
+```python
+@test
+def test_business_rules(output, *args) -> None:
+    """
+    Validate business logic constraints.
+    """
+    # Rule 1: Total spent must be non-negative
+    negative_amounts = output[output['total_spent'] < 0]
+    assert len(negative_amounts) == 0, \
+        f'Found {len(negative_amounts)} records with negative total_spent'
+    
+    # Rule 2: Active customers must have email
+    active_without_email = output[
+        (output['is_active'] == True) & 
+        (output['email'].isna())
+    ]
+    assert len(active_without_email) == 0, \
+        f'Found {len(active_without_email)} active customers without email'
+    
+    # Rule 3: Creation date must not be in future
+    future_dates = output[output['created_at'] > pd.Timestamp.now()]
+    assert len(future_dates) == 0, \
+        f'Found {len(future_dates)} records with future creation dates'
+```
+
+### Statistical Tests
+
+```python
+@test
+def test_data_distribution(output, *args) -> None:
+    """
+    Validate expected data distributions.
+    """
+    # Test for outliers using IQR method
+    Q1 = output['total_spent'].quantile(0.25)
+    Q3 = output['total_spent'].quantile(0.75)
+    IQR = Q3 - Q1
+    
+    lower_bound = Q1 - 3 * IQR
+    upper_bound = Q3 + 3 * IQR
+    
+    outliers = output[
+        (output['total_spent'] < lower_bound) | 
+        (output['total_spent'] > upper_bound)
+    ]
+    
+    outlier_pct = (len(outliers) / len(output)) * 100
+    assert outlier_pct < 1.0, \
+        f'Outlier percentage {outlier_pct:.1f}% exceeds 1% threshold'
+
+@test  
+def test_record_count_reasonable(output, *args) -> None:
+    """
+    Validate record count is within expected range.
+    """
+    min_expected = 100
+    max_expected = 1000000
+    
+    record_count = len(output)
+    assert min_expected <= record_count <= max_expected, \
+        f'Record count {record_count} outside expected range [{min_expected}, {max_expected}]'
+```
+
+## Integration Testing
+
+### Testing Block Dependencies
+
+```python
+from mage_ai.data_preparation.decorators import transformer, test
+
+@transformer
+def transform_customer_orders(customers, orders, *args, **kwargs):
+    """
+    Join customers with their orders.
+    Input: customers (from upstream block 1), orders (from upstream block 2)
+    """
+    return customers.merge(orders, on='customer_id', how='left')
+
+@test
+def test_upstream_data_exists(output, *args, **kwargs) -> None:
+    """
+    Verify upstream block data is available.
+    """
+    # Access kwargs to check upstream execution
+    upstream_blocks = kwargs.get('upstream_blocks', [])
+    assert len(upstream_blocks) >= 2, 'Expected at least 2 upstream blocks'
+
+@test
+def test_join_completeness(output, *args) -> None:
+    """
+    Verify join didn't lose customer records.
+    """
+    # This test would compare to original customer count
+    # In practice, you'd access the original data through kwargs
+    assert output is not None
+    assert 'customer_id' in output.columns
+    assert 'order_id' in output.columns
+```
+
+### End-to-End Pipeline Tests
+
+Create a test pipeline to validate the complete flow:
+
+```python
+# test_pipelines/test_customer_analytics.py
+import pytest
+from mage_ai.data_preparation.models.pipeline import Pipeline
+
+def test_customer_analytics_pipeline():
+    """
+    Test entire customer analytics pipeline.
+    """
+    # Load test pipeline
+    pipeline = Pipeline.get('customer_analytics', repo_path='.')
+    
+    # Verify pipeline structure
+    assert pipeline is not None
+    assert len(pipeline.blocks_by_uuid) > 0
+    
+    # Verify block dependencies
+    load_block = pipeline.blocks_by_uuid.get('load_customers')
+    assert load_block is not None
+    
+    transform_block = pipeline.blocks_by_uuid.get('transform_customers')
+    assert transform_block is not None
+    assert load_block in transform_block.upstream_blocks
+    
+    # Execute pipeline with test data
+    global_vars = {
+        'env': 'test',
+        'test_mode': True,
+    }
+    
+    # Run synchronously for testing
+    pipeline.execute_sync(
+        global_vars=global_vars,
+        run_tests=True,
+    )
+    
+    # Verify final output
+    variable_manager = pipeline.variable_manager
+    output = variable_manager.get_variable(
+        pipeline.uuid,
+        'export_to_warehouse',
+        'output_0',
+    )
+    
+    assert output is not None
+    assert len(output) > 0
+```
+
+## Unit Testing with pytest
+
+### Testing Block Logic
+
+Extract and test block logic independently:
+
+```python
+# blocks/transformers/calculate_metrics.py
+import pandas as pd
+
+def calculate_customer_lifetime_value(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Calculate customer lifetime value.
+    Extracted for unit testing.
+    """
+    return df.groupby('customer_id').agg({
+        'order_amount': 'sum',
+        'order_id': 'count',
+    }).rename(columns={
+        'order_amount': 'lifetime_value',
+        'order_id': 'order_count',
+    }).reset_index()
+
+@transformer
+def transform(data, *args, **kwargs):
+    """Mage transformer block."""
+    return calculate_customer_lifetime_value(data)
+```
+
+```python
+# tests/unit/test_calculate_metrics.py
+import pytest
+import pandas as pd
+from blocks.transformers.calculate_metrics import calculate_customer_lifetime_value
+
+def test_calculate_lifetime_value_basic():
+    """Test basic LTV calculation."""
+    # Arrange
+    input_data = pd.DataFrame({
+        'customer_id': [1, 1, 2, 2, 2],
+        'order_id': [101, 102, 201, 202, 203],
+        'order_amount': [100, 150, 200, 50, 75],
+    })
+    
+    # Act
+    result = calculate_customer_lifetime_value(input_data)
+    
+    # Assert
+    assert len(result) == 2
+    assert result[result['customer_id'] == 1]['lifetime_value'].iloc[0] == 250
+    assert result[result['customer_id'] == 2]['lifetime_value'].iloc[0] == 325
+
+def test_calculate_lifetime_value_empty_input():
+    """Test handling of empty DataFrame."""
+    input_data = pd.DataFrame(columns=['customer_id', 'order_id', 'order_amount'])
+    result = calculate_customer_lifetime_value(input_data)
+    assert len(result) == 0
+
+def test_calculate_lifetime_value_single_customer():
+    """Test with single customer."""
+    input_data = pd.DataFrame({
+        'customer_id': [1],
+        'order_id': [101],
+        'order_amount': [500],
+    })
+    result = calculate_customer_lifetime_value(input_data)
+    assert len(result) == 1
+    assert result['lifetime_value'].iloc[0] == 500
+    assert result['order_count'].iloc[0] == 1
+
+@pytest.mark.parametrize('customer_id,amounts,expected_ltv', [
+    (1, [100, 200, 300], 600),
+    (2, [50], 50),
+    (3, [1000, 2000], 3000),
+])
+def test_calculate_lifetime_value_parametrized(customer_id, amounts, expected_ltv):
+    """Parametrized test for multiple scenarios."""
+    input_data = pd.DataFrame({
+        'customer_id': [customer_id] * len(amounts),
+        'order_id': range(len(amounts)),
+        'order_amount': amounts,
+    })
+    result = calculate_customer_lifetime_value(input_data)
+    assert result['lifetime_value'].iloc[0] == expected_ltv
+```
+
+<Tip>
+**Benefits of extracting testable functions:**
+- Faster test execution (no Mage overhead)
+- Easier to test edge cases
+- Better code reusability
+- Simplified debugging
+</Tip>
+
+### Mocking External Dependencies
+
+```python
+# tests/unit/test_api_loader.py
+import pytest
+from unittest.mock import Mock, patch
+import pandas as pd
+
+@patch('blocks.data_loaders.load_from_api.requests.get')
+def test_load_from_api_success(mock_get):
+    """Test successful API call."""
+    # Mock API response
+    mock_response = Mock()
+    mock_response.status_code = 200
+    mock_response.json.return_value = {
+        'customers': [
+            {'id': 1, 'name': 'Alice'},
+            {'id': 2, 'name': 'Bob'},
+        ]
+    }
+    mock_get.return_value = mock_response
+    
+    # Import and test
+    from blocks.data_loaders.load_from_api import fetch_customers
+    result = fetch_customers()
+    
+    assert len(result) == 2
+    assert result['name'].tolist() == ['Alice', 'Bob']
+    mock_get.assert_called_once()
+
+@patch('blocks.data_loaders.load_from_api.requests.get')
+def test_load_from_api_retry_on_failure(mock_get):
+    """Test retry logic on API failure."""
+    # First call fails, second succeeds
+    mock_get.side_effect = [
+        Exception('Connection timeout'),
+        Mock(status_code=200, json=lambda: {'customers': []}),
+    ]
+    
+    from blocks.data_loaders.load_from_api import fetch_customers_with_retry
+    result = fetch_customers_with_retry(max_retries=2)
+    
+    assert result is not None
+    assert mock_get.call_count == 2
+```
+
+## Test Data Management
+
+### Fixtures for Test Data
+
+```python
+# tests/fixtures/sample_data.py
+import pytest
+import pandas as pd
+from datetime import datetime, timedelta
+
+@pytest.fixture
+def sample_customers():
+    """Generate sample customer data."""
+    return pd.DataFrame({
+        'customer_id': range(1, 11),
+        'name': [f'Customer {i}' for i in range(1, 11)],
+        'email': [f'customer{i}@example.com' for i in range(1, 11)],
+        'created_at': [datetime.now() - timedelta(days=i*30) for i in range(1, 11)],
+        'is_active': [True] * 8 + [False] * 2,
+    })
+
+@pytest.fixture
+def sample_orders():
+    """Generate sample order data."""
+    return pd.DataFrame({
+        'order_id': range(1, 21),
+        'customer_id': [i % 10 + 1 for i in range(20)],
+        'order_date': [datetime.now() - timedelta(days=i) for i in range(20)],
+        'amount': [100 + i * 10 for i in range(20)],
+    })
+
+@pytest.fixture
+def sample_invalid_data():
+    """Generate data with quality issues for testing validation."""
+    return pd.DataFrame({
+        'customer_id': [1, 2, None, 4],  # Missing ID
+        'name': ['Alice', None, 'Charlie', 'Dave'],  # Missing name
+        'email': ['valid@example.com', 'invalid-email', 'also@valid.com', None],
+        'total_spent': [100, -50, 200, 150],  # Negative value
+    })
+```
+
+### Using Fixtures in Tests
+
+```python
+# tests/unit/test_transformations.py
+import pytest
+from blocks.transformers.clean_data import clean_customer_data
+
+def test_clean_removes_nulls(sample_invalid_data):
+    """Test that cleaning removes null values."""
+    result = clean_customer_data(sample_invalid_data)
+    assert result['customer_id'].isna().sum() == 0
+    assert result['name'].isna().sum() == 0
+
+def test_clean_filters_negative_values(sample_invalid_data):
+    """Test that negative values are handled."""
+    result = clean_customer_data(sample_invalid_data)
+    assert (result['total_spent'] >= 0).all()
+
+def test_join_customers_orders(sample_customers, sample_orders):
+    """Test joining customer and order data."""
+    from blocks.transformers.join_data import join_customer_orders
+    
+    result = join_customer_orders(sample_customers, sample_orders)
+    
+    assert 'customer_id' in result.columns
+    assert 'order_id' in result.columns
+    assert len(result) > 0
+```
+
+## Testing Dynamic Blocks
+
+### Dynamic Block Test Pattern
+
+```python
+from mage_ai.data_preparation.decorators import data_loader, test
+
+@data_loader  
+def load_customer_segments(*args, **kwargs):
+    """
+    Load data that will create dynamic child blocks.
+    Returns list of segments to process.
+    """
+    return [
+        {'segment': 'premium', 'min_ltv': 10000},
+        {'segment': 'standard', 'min_ltv': 1000},
+        {'segment': 'basic', 'min_ltv': 0},
+    ]
+
+@test
+def test_returns_list(output, *args) -> None:
+    """Dynamic blocks must return a list."""
+    assert isinstance(output, list), 'Output must be a list for dynamic blocks'
+    assert len(output) > 0, 'Output list cannot be empty'
+
+@test
+def test_each_item_has_required_keys(output, *args) -> None:
+    """Validate structure of dynamic block items."""
+    required_keys = ['segment', 'min_ltv']
+    
+    for idx, item in enumerate(output):
+        assert isinstance(item, dict), f'Item {idx} must be a dictionary'
+        for key in required_keys:
+            assert key in item, f'Item {idx} missing required key: {key}'
+```
+
+```python
+@transformer
+def process_segment(data, *args, **kwargs):
+    """
+    Process one segment (runs once per dynamic parent item).
+    """
+    segment = data['segment']
+    min_ltv = data['min_ltv']
+    
+    # Process segment...
+    return segment_results
+
+@test
+def test_segment_results_not_empty(output, *args) -> None:
+    """Each dynamic child should produce results."""
+    assert output is not None
+    assert len(output) > 0, 'Segment processing returned no results'
+```
+
+## Regression Testing
+
+### Snapshot Testing
+
+Capture and compare outputs:
+
+```python
+import json
+import hashlib
+from mage_ai.data_preparation.decorators import test
+
+@test
+def test_output_matches_snapshot(output, *args, **kwargs) -> None:
+    """
+    Compare output to saved snapshot.
+    """
+    # Convert output to stable format
+    output_dict = output.to_dict('records')
+    output_json = json.dumps(output_dict, sort_keys=True)
+    output_hash = hashlib.md5(output_json.encode()).hexdigest()
+    
+    snapshot_file = '/tmp/output_snapshot.txt'
+    
+    # First run: save snapshot
+    if not os.path.exists(snapshot_file):
+        with open(snapshot_file, 'w') as f:
+            f.write(output_hash)
+        return
+    
+    # Compare to snapshot
+    with open(snapshot_file, 'r') as f:
+        expected_hash = f.read().strip()
+    
+    assert output_hash == expected_hash, \
+        f'Output changed: {output_hash} != {expected_hash}'
+```
+
+<Warning>
+Snapshot tests are sensitive to data changes. Use them for:
+- Transformation logic validation
+- Regression detection
+- Schema consistency checks
+
+Avoid for:
+- Data with timestamps
+- Non-deterministic operations
+- Large datasets (use sampling)
+</Warning>
+
+## Performance Testing
+
+### Execution Time Tests
+
+```python
+import time
+from mage_ai.data_preparation.decorators import test
+
+@test
+def test_execution_time_acceptable(output, *args, **kwargs) -> None:
+    """
+    Verify block completes within time limit.
+    """
+    # Access execution metadata if available
+    execution_time = kwargs.get('execution_time')
+    
+    if execution_time:
+        max_execution_seconds = 300  # 5 minutes
+        assert execution_time < max_execution_seconds, \
+            f'Execution took {execution_time}s, exceeds {max_execution_seconds}s limit'
+```
+
+### Memory Usage Tests
+
+```python
+import psutil
+from mage_ai.data_preparation.decorators import test
+
+@test
+def test_memory_usage_acceptable(output, *args, **kwargs) -> None:
+    """
+    Verify block doesn't exceed memory limits.
+    """
+    # Check current memory usage
+    process = psutil.Process()
+    memory_mb = process.memory_info().rss / (1024 * 1024)
+    
+    max_memory_mb = 1024  # 1GB limit
+    assert memory_mb < max_memory_mb, \
+        f'Memory usage {memory_mb:.1f}MB exceeds {max_memory_mb}MB limit'
+```
+
+## Continuous Integration
+
+### GitHub Actions Example
+
+```yaml
+# .github/workflows/test.yml
+name: Test Pipelines
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+    
+    - name: Install dependencies
+      run: |
+        pip install mage-ai pytest pytest-cov
+        pip install -r requirements.txt
+    
+    - name: Run unit tests
+      run: |
+        pytest tests/unit/ -v --cov=blocks --cov-report=xml
+    
+    - name: Run integration tests  
+      run: |
+        pytest tests/integration/ -v
+    
+    - name: Test pipeline execution
+      run: |
+        python scripts/test_pipelines.py
+    
+    - name: Upload coverage
+      uses: codecov/codecov-action@v3
+      with:
+        files: ./coverage.xml
+```
+
+### Pre-commit Hooks
+
+```yaml
+# .pre-commit-config.yaml
+repos:
+  - repo: local
+    hooks:
+      - id: run-tests
+        name: Run Mage tests
+        entry: pytest tests/unit/ -v
+        language: system
+        pass_filenames: false
+        
+      - id: validate-pipelines
+        name: Validate pipeline configs
+        entry: python scripts/validate_pipelines.py
+        language: system
+        pass_filenames: false
+```
+
+## Testing Best Practices Summary
+
+<Accordion title="Testing Strategy Checklist">
+
+**Block Tests:**
+- ✅ Add `@test` decorators for inline validation
+- ✅ Test output is not None/empty
+- ✅ Validate required columns exist
+- ✅ Check data types match expectations
+- ✅ Verify no duplicates in key columns
+- ✅ Test null value constraints
+- ✅ Validate business rules
+
+**Unit Tests:**
+- ✅ Extract complex logic into testable functions
+- ✅ Use pytest for comprehensive testing
+- ✅ Create fixtures for test data
+- ✅ Mock external dependencies
+- ✅ Test edge cases (empty, single row, large data)
+- ✅ Use parametrized tests for multiple scenarios
+
+**Integration Tests:**
+- ✅ Test block dependencies work together
+- ✅ Validate end-to-end pipeline execution
+- ✅ Test with realistic data volumes
+- ✅ Verify final output quality
+
+**Quality Checks:**
+- ✅ Schema validation
+- ✅ Statistical distribution tests
+- ✅ Record count validation
+- ✅ Performance/timing tests
+- ✅ Memory usage tests
+
+**CI/CD:**
+- ✅ Run tests on every commit
+- ✅ Track test coverage
+- ✅ Use pre-commit hooks
+- ✅ Validate pipeline configs
+
+**Documentation:**
+- ✅ Document test purpose in docstrings
+- ✅ Explain validation thresholds
+- ✅ Maintain test data fixtures
+
+</Accordion>

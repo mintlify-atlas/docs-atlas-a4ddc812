@@ -1,0 +1,508 @@
+---
+title: "Pipeline Endpoints"
+description: "REST API endpoints for managing pipelines in Mage"
+---
+
+## Overview
+
+Pipeline endpoints allow you to create, read, update, and delete pipelines programmatically.
+
+## Base URL
+
+```
+http://localhost:6789/api/pipelines
+```
+
+## List Pipelines
+
+Retrieve a list of all pipelines.
+
+```http
+GET /api/pipelines
+```
+
+### Query Parameters
+
+<ParamField query="_limit" type="integer">
+  Maximum number of pipelines to return
+</ParamField>
+
+<ParamField query="_offset" type="integer">
+  Number of pipelines to skip (for pagination)
+</ParamField>
+
+<ParamField query="_order_by[]" type="string">
+  Field to sort by. Prefix with `-` for descending order.
+  
+  Options: `name`, `created_at`, `updated_at`, `type`
+</ParamField>
+
+<ParamField query="search" type="string">
+  Search query to filter pipelines by name
+</ParamField>
+
+<ParamField query="tag[]" type="string">
+  Filter pipelines by tags (comma-separated)
+</ParamField>
+
+<ParamField query="type[]" type="string">
+  Filter pipelines by type (comma-separated)
+  
+  Options: `python`, `pyspark`, `databricks`, `streaming`, `integration`
+</ParamField>
+
+<ParamField query="status[]" type="string">
+  Filter pipelines by status
+  
+  Options: `active`, `inactive`, `failed`
+</ParamField>
+
+<ParamField query="include_schedules" type="boolean">
+  Include schedule information for each pipeline
+</ParamField>
+
+<ParamField query="repo_path" type="string">
+  Repository path to filter pipelines
+</ParamField>
+
+### Request Example
+
+<CodeGroup>
+
+```bash cURL
+curl -X GET "http://localhost:6789/api/pipelines?_limit=10&_offset=0" \
+  -H "API-Key: your_api_key" \
+  -H "OAUTH-TOKEN: your_access_token"
+```
+
+```python Python
+import requests
+
+url = "http://localhost:6789/api/pipelines"
+headers = {
+    "API-Key": "your_api_key",
+    "OAUTH-TOKEN": "your_access_token"
+}
+params = {
+    "_limit": 10,
+    "_offset": 0,
+    "include_schedules": True
+}
+
+response = requests.get(url, headers=headers, params=params)
+pipelines = response.json()
+```
+
+```javascript JavaScript
+const response = await fetch(
+  'http://localhost:6789/api/pipelines?_limit=10&_offset=0',
+  {
+    headers: {
+      'API-Key': 'your_api_key',
+      'OAUTH-TOKEN': 'your_access_token'
+    }
+  }
+);
+const pipelines = await response.json();
+```
+
+</CodeGroup>
+
+### Response
+
+<ResponseField name="pipelines" type="array">
+  Array of pipeline objects
+  
+  <ResponseField name="uuid" type="string">
+    Unique identifier for the pipeline
+  </ResponseField>
+  
+  <ResponseField name="name" type="string">
+    Display name of the pipeline
+  </ResponseField>
+  
+  <ResponseField name="type" type="string">
+    Pipeline type (e.g., `python`, `pyspark`, `streaming`)
+  </ResponseField>
+  
+  <ResponseField name="description" type="string">
+    Description of the pipeline
+  </ResponseField>
+  
+  <ResponseField name="blocks" type="array">
+    Array of block UUIDs in the pipeline
+  </ResponseField>
+  
+  <ResponseField name="schedules" type="array">
+    Array of schedule objects (if `include_schedules=true`)
+  </ResponseField>
+  
+  <ResponseField name="created_at" type="string">
+    ISO 8601 timestamp of creation
+  </ResponseField>
+  
+  <ResponseField name="updated_at" type="string">
+    ISO 8601 timestamp of last update
+  </ResponseField>
+</ResponseField>
+
+```json Example Response
+{
+  "pipelines": [
+    {
+      "uuid": "example_pipeline",
+      "name": "Example Pipeline",
+      "type": "python",
+      "description": "An example data pipeline",
+      "blocks": [
+        {
+          "uuid": "load_data",
+          "type": "data_loader",
+          "language": "python"
+        },
+        {
+          "uuid": "transform_data",
+          "type": "transformer",
+          "language": "python"
+        }
+      ],
+      "created_at": "2024-03-04T10:00:00Z",
+      "updated_at": "2024-03-04T15:30:00Z"
+    }
+  ]
+}
+```
+
+## Get Pipeline
+
+Retrieve details for a specific pipeline.
+
+```http
+GET /api/pipelines/{pipeline_uuid}
+```
+
+### Path Parameters
+
+<ParamField path="pipeline_uuid" type="string" required>
+  The unique identifier of the pipeline
+</ParamField>
+
+### Request Example
+
+<CodeGroup>
+
+```bash cURL
+curl -X GET "http://localhost:6789/api/pipelines/example_pipeline" \
+  -H "API-Key: your_api_key" \
+  -H "OAUTH-TOKEN: your_access_token"
+```
+
+```python Python
+import requests
+
+url = "http://localhost:6789/api/pipelines/example_pipeline"
+headers = {
+    "API-Key": "your_api_key",
+    "OAUTH-TOKEN": "your_access_token"
+}
+
+response = requests.get(url, headers=headers)
+pipeline = response.json()
+```
+
+</CodeGroup>
+
+### Response
+
+```json
+{
+  "pipeline": {
+    "uuid": "example_pipeline",
+    "name": "Example Pipeline",
+    "type": "python",
+    "description": "An example data pipeline",
+    "blocks": [
+      {
+        "uuid": "load_data",
+        "type": "data_loader",
+        "language": "python",
+        "upstream_blocks": [],
+        "downstream_blocks": ["transform_data"]
+      }
+    ],
+    "widgets": [],
+    "extensions": {},
+    "callbacks": [],
+    "created_at": "2024-03-04T10:00:00Z",
+    "updated_at": "2024-03-04T15:30:00Z"
+  }
+}
+```
+
+## Create Pipeline
+
+Create a new pipeline.
+
+```http
+POST /api/pipelines
+```
+
+### Request Body
+
+<ParamField body="name" type="string" required>
+  Name of the pipeline (will be converted to UUID format)
+</ParamField>
+
+<ParamField body="description" type="string">
+  Description of the pipeline
+</ParamField>
+
+<ParamField body="type" type="string" required>
+  Type of pipeline
+  
+  Options: `python`, `pyspark`, `databricks`, `streaming`, `integration`
+</ParamField>
+
+<ParamField body="tags" type="array">
+  Array of tag strings
+</ParamField>
+
+<ParamField body="clone_pipeline_uuid" type="string">
+  UUID of pipeline to clone
+</ParamField>
+
+### Request Example
+
+<CodeGroup>
+
+```bash cURL
+curl -X POST "http://localhost:6789/api/pipelines" \
+  -H "API-Key: your_api_key" \
+  -H "OAUTH-TOKEN: your_access_token" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "pipeline": {
+      "name": "my_new_pipeline",
+      "description": "A new data pipeline",
+      "type": "python",
+      "tags": ["production", "etl"]
+    }
+  }'
+```
+
+```python Python
+import requests
+
+url = "http://localhost:6789/api/pipelines"
+headers = {
+    "API-Key": "your_api_key",
+    "OAUTH-TOKEN": "your_access_token",
+    "Content-Type": "application/json"
+}
+data = {
+    "pipeline": {
+        "name": "my_new_pipeline",
+        "description": "A new data pipeline",
+        "type": "python",
+        "tags": ["production", "etl"]
+    }
+}
+
+response = requests.post(url, headers=headers, json=data)
+pipeline = response.json()
+```
+
+</CodeGroup>
+
+### Response
+
+```json
+{
+  "pipeline": {
+    "uuid": "my_new_pipeline",
+    "name": "my_new_pipeline",
+    "type": "python",
+    "description": "A new data pipeline",
+    "blocks": [],
+    "created_at": "2024-03-04T16:00:00Z",
+    "updated_at": "2024-03-04T16:00:00Z"
+  }
+}
+```
+
+## Update Pipeline
+
+Update an existing pipeline.
+
+```http
+PUT /api/pipelines/{pipeline_uuid}
+```
+
+### Path Parameters
+
+<ParamField path="pipeline_uuid" type="string" required>
+  The unique identifier of the pipeline
+</ParamField>
+
+### Request Body
+
+<ParamField body="name" type="string">
+  New name for the pipeline
+</ParamField>
+
+<ParamField body="description" type="string">
+  Updated description
+</ParamField>
+
+<ParamField body="blocks" type="array">
+  Array of block configurations
+</ParamField>
+
+<ParamField body="tags" type="array">
+  Updated array of tags
+</ParamField>
+
+<ParamField body="add_upstream_for_block_uuid" type="string">
+  Block UUID to add upstream blocks to
+</ParamField>
+
+### Request Example
+
+<CodeGroup>
+
+```bash cURL
+curl -X PUT "http://localhost:6789/api/pipelines/example_pipeline" \
+  -H "API-Key: your_api_key" \
+  -H "OAUTH-TOKEN: your_access_token" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "pipeline": {
+      "description": "Updated pipeline description",
+      "tags": ["production", "etl", "critical"]
+    }
+  }'
+```
+
+```python Python
+import requests
+
+url = "http://localhost:6789/api/pipelines/example_pipeline"
+headers = {
+    "API-Key": "your_api_key",
+    "OAUTH-TOKEN": "your_access_token",
+    "Content-Type": "application/json"
+}
+data = {
+    "pipeline": {
+        "description": "Updated pipeline description",
+        "tags": ["production", "etl", "critical"]
+    }
+}
+
+response = requests.put(url, headers=headers, json=data)
+pipeline = response.json()
+```
+
+</CodeGroup>
+
+## Delete Pipeline
+
+Delete a pipeline.
+
+```http
+DELETE /api/pipelines/{pipeline_uuid}
+```
+
+### Path Parameters
+
+<ParamField path="pipeline_uuid" type="string" required>
+  The unique identifier of the pipeline to delete
+</ParamField>
+
+### Request Example
+
+<CodeGroup>
+
+```bash cURL
+curl -X DELETE "http://localhost:6789/api/pipelines/example_pipeline" \
+  -H "API-Key: your_api_key" \
+  -H "OAUTH-TOKEN: your_access_token"
+```
+
+```python Python
+import requests
+
+url = "http://localhost:6789/api/pipelines/example_pipeline"
+headers = {
+    "API-Key": "your_api_key",
+    "OAUTH-TOKEN": "your_access_token"
+}
+
+response = requests.delete(url, headers=headers)
+```
+
+</CodeGroup>
+
+### Response
+
+```json
+{
+  "pipeline": {
+    "uuid": "example_pipeline",
+    "deleted": true
+  }
+}
+```
+
+## Pipeline Types
+
+<CardGroup cols={2}>
+  <Card title="Python" icon="python">
+    Standard Python data pipeline
+  </Card>
+  <Card title="PySpark" icon="fire">
+    Apache Spark-based data pipeline
+  </Card>
+  <Card title="Streaming" icon="water">
+    Real-time streaming data pipeline
+  </Card>
+  <Card title="Integration" icon="plug">
+    Data integration pipeline for ETL/ELT
+  </Card>
+</CardGroup>
+
+## Error Responses
+
+### Pipeline Not Found
+
+```json
+{
+  "error": {
+    "code": 404,
+    "message": "Pipeline not found"
+  }
+}
+```
+
+### Invalid Pipeline Configuration
+
+```json
+{
+  "error": {
+    "code": 400,
+    "message": "Invalid pipeline configuration",
+    "errors": ["Pipeline type is required"]
+  }
+}
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Block Endpoints" icon="cube" href="/api/rest/blocks">
+    Add and manage blocks in pipelines
+  </Card>
+  <Card title="Pipeline Runs" icon="play" href="/api/rest/pipeline-runs">
+    Execute and monitor pipeline runs
+  </Card>
+</CardGroup>

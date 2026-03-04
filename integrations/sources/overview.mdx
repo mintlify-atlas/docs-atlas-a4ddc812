@@ -1,0 +1,205 @@
+---
+title: 'Data Sources Overview'
+description: 'Connect to databases, APIs, cloud storage, and streaming platforms to ingest data into Mage'
+---
+
+Mage provides native integrations with a wide variety of data sources, enabling you to extract data from databases, APIs, cloud storage, and streaming platforms. All sources are built on the Singer specification for reliable, standardized data extraction.
+
+## Source Categories
+
+<CardGroup cols={2}>
+  <Card title="Databases" icon="database" href="/integrations/sources/databases">
+    Connect to SQL and NoSQL databases including PostgreSQL, MySQL, Snowflake, BigQuery, MongoDB, and more.
+  </Card>
+  <Card title="APIs & SaaS" icon="cloud" href="/integrations/sources/apis">
+    Integrate with REST APIs, GraphQL, and SaaS platforms like Salesforce, Stripe, HubSpot, and GitHub.
+  </Card>
+  <Card title="Cloud Storage" icon="cloud-arrow-up" href="/integrations/sources/cloud-storage">
+    Load data from S3, Google Cloud Storage, and Azure Blob Storage with support for CSV and Parquet formats.
+  </Card>
+  <Card title="Streaming" icon="bolt" href="/integrations/sources/streaming">
+    Real-time data ingestion from Kafka, Kinesis, Pub/Sub, and other streaming platforms.
+  </Card>
+</CardGroup>
+
+## Available Sources
+
+Mage supports **50+ data sources** across multiple categories:
+
+### Databases
+- **SQL**: PostgreSQL, MySQL, MSSQL, Oracle, Redshift, Snowflake, BigQuery, Teradata, Doris, Dremio
+- **NoSQL**: MongoDB, Couchbase, DynamoDB
+- **Analytical**: Snowflake, BigQuery, Redshift, Clickhouse
+
+### APIs & SaaS Platforms
+- **CRM**: Salesforce, HubSpot, Pipedrive, Zendesk, Freshdesk, Front, Intercom
+- **Marketing**: Google Ads, Facebook Ads, LinkedIn Ads, Twitter Ads, Google Analytics, Google Search Console
+- **Finance**: Stripe, Chargebee, Paystack
+- **Productivity**: Airtable, Google Sheets, Monday, Mode, Tableau, PowerBI
+- **Development**: GitHub, Datadog
+- **Communication**: Postmark, Amplitude
+- **E-commerce**: Commercetools
+- **Other**: API (generic REST/GraphQL), HTTP, Outreach, Knowi
+
+### Cloud Storage
+- Amazon S3
+- Google Cloud Storage
+- Azure Blob Storage
+- SFTP
+
+### Streaming
+- Apache Kafka (via kafka-python)
+- AWS Kinesis
+- Google Pub/Sub
+- RabbitMQ
+- NATS
+- ActiveMQ (via STOMP)
+
+## Key Features
+
+### Replication Methods
+
+Mage sources support multiple replication strategies:
+
+- **Full Table**: Complete data refresh on each sync
+- **Incremental**: Only sync new/updated records based on a replication key
+- **Log-Based (CDC)**: Real-time change data capture for PostgreSQL using logical replication
+
+### Schema Discovery
+
+All sources automatically discover available tables/streams and their schemas:
+
+```python
+from mage_integrations.sources.postgresql import PostgreSQL
+
+source = PostgreSQL(config={
+    'host': 'localhost',
+    'database': 'mydb',
+    'username': 'user',
+    'password': 'pass',
+    'schema': 'public'
+})
+
+# Discover available tables and schemas
+catalog = source.discover()
+```
+
+### Connection Testing
+
+Test connectivity before running full extractions:
+
+```python
+source = PostgreSQL(config=config)
+source.test_connection()
+```
+
+### Sample Data
+
+Preview data before committing to a full sync:
+
+```python
+source = PostgreSQL(config=config)
+for rows in source.load_data(stream, sample_data=True):
+    print(rows[:10])  # Preview first 10 rows
+```
+
+## Configuration Structure
+
+Each source follows a consistent configuration pattern:
+
+<Accordion title="Database Source Configuration">
+```json
+{
+  "host": "database.example.com",
+  "port": 5432,
+  "database": "production",
+  "schema": "public",
+  "username": "readonly_user",
+  "password": "${env:DB_PASSWORD}",
+  "start_date": "2024-01-01T00:00:00Z"
+}
+```
+</Accordion>
+
+<Accordion title="API Source Configuration">
+```json
+{
+  "api_key": "${env:API_KEY}",
+  "start_date": "2024-01-01T00:00:00Z",
+  "account_id": "acc_123456"
+}
+```
+</Accordion>
+
+<Accordion title="Cloud Storage Configuration">
+```json
+{
+  "bucket": "my-data-bucket",
+  "prefix": "raw_data/",
+  "aws_access_key_id": "${env:AWS_ACCESS_KEY_ID}",
+  "aws_secret_access_key": "${env:AWS_SECRET_ACCESS_KEY}",
+  "aws_region": "us-west-2",
+  "file_type": "parquet"
+}
+```
+</Accordion>
+
+## Stream Selection
+
+Select specific streams (tables/endpoints) to sync:
+
+```python
+source = PostgreSQL(config=config)
+catalog = source.discover(streams=['users', 'orders', 'products'])
+```
+
+## State Management
+
+Mage automatically manages state for incremental syncs:
+
+```python
+state = {
+    "bookmarks": {
+        "users": {"updated_at": "2024-03-01T12:00:00Z"},
+        "orders": {"created_at": "2024-03-01T12:00:00Z"}
+    }
+}
+
+source = PostgreSQL(config=config, state=state)
+source.process()
+```
+
+## Installation
+
+Sources can be installed with optional dependencies:
+
+```bash
+# Install base Mage
+pip install mage-ai
+
+# Install with database support
+pip install "mage-ai[postgres,mysql,snowflake,bigquery]"
+
+# Install with cloud storage support
+pip install "mage-ai[s3,google-cloud-storage,azure]"
+
+# Install all integrations
+pip install "mage-ai[all]"
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Database Sources" icon="database" href="/integrations/sources/databases">
+    Configure PostgreSQL, MySQL, Snowflake, BigQuery, and more
+  </Card>
+  <Card title="API Sources" icon="cloud" href="/integrations/sources/apis">
+    Connect to REST APIs and SaaS platforms
+  </Card>
+  <Card title="Cloud Storage" icon="folder" href="/integrations/sources/cloud-storage">
+    Load files from S3, GCS, and Azure
+  </Card>
+  <Card title="Streaming Sources" icon="bolt" href="/integrations/sources/streaming">
+    Real-time data from Kafka, Kinesis, and Pub/Sub
+  </Card>
+</CardGroup>

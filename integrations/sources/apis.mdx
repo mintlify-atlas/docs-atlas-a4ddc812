@@ -1,0 +1,706 @@
+---
+title: 'API & SaaS Sources'
+description: 'Connect to REST APIs, GraphQL, and SaaS platforms to extract data with Mage'
+---
+
+Mage provides native integrations with popular SaaS platforms and a generic API source for custom REST and GraphQL APIs. All API sources support incremental syncs, automatic schema discovery, and rate limit handling.
+
+## Supported Sources
+
+<CardGroup cols={3}>
+  <Card title="Salesforce" icon="salesforce">
+    CRM data with Bulk API support
+  </Card>
+  <Card title="Stripe" icon="stripe">
+    Payment and subscription data
+  </Card>
+  <Card title="HubSpot" icon="hubspot">
+    Marketing and CRM platform
+  </Card>
+  <Card title="GitHub" icon="github">
+    Repository and issue data
+  </Card>
+  <Card title="Google Ads" icon="google">
+    Advertising campaign data
+  </Card>
+  <Card title="Facebook Ads" icon="facebook">
+    Social media advertising
+  </Card>
+  <Card title="Airtable" icon="table">
+    Cloud spreadsheet platform
+  </Card>
+  <Card title="Google Sheets" icon="sheet">
+    Spreadsheet data extraction
+  </Card>
+  <Card title="Generic API" icon="code">
+    Custom REST/GraphQL APIs
+  </Card>
+</CardGroup>
+
+## Generic API Source
+
+Connect to any REST API or load data from URLs including Google Sheets, CSV, JSON, and Excel files.
+
+### REST API Configuration
+
+```json
+{
+  "url": "https://api.example.com/v1/data",
+  "method": "GET",
+  "headers": {
+    "Authorization": "Bearer ${env:API_TOKEN}",
+    "Content-Type": "application/json"
+  },
+  "query": {
+    "limit": "1000",
+    "start_date": "2024-01-01"
+  }
+}
+```
+
+### POST Request
+
+```json
+{
+  "url": "https://api.example.com/v1/query",
+  "method": "POST",
+  "headers": {
+    "Authorization": "Bearer ${env:API_TOKEN}",
+    "Content-Type": "application/json"
+  },
+  "payload": {
+    "query": "{ users { id name email } }"
+  }
+}
+```
+
+### Response Parser
+
+Extract nested data from API responses:
+
+```json
+{
+  "url": "https://api.example.com/v1/users",
+  "headers": {
+    "Authorization": "Bearer ${env:API_TOKEN}"
+  },
+  "response_parser": ["data", "users"]
+}
+```
+
+This extracts `response.data.users` from:
+```json
+{
+  "status": "success",
+  "data": {
+    "users": [
+      {"id": 1, "name": "John"},
+      {"id": 2, "name": "Jane"}
+    ]
+  }
+}
+```
+
+### CSV/TSV Files
+
+```json
+{
+  "url": "https://example.com/data.csv",
+  "separator": ",",
+  "has_header": true
+}
+```
+
+### Google Sheets
+
+```json
+{
+  "url": "https://docs.google.com/spreadsheets/d/SHEET_ID/export?format=csv&gid=0",
+  "separator": ",",
+  "has_header": true
+}
+```
+
+<CodeGroup>
+```python Python
+from mage_integrations.sources.api import Api
+
+config = {
+    'url': 'https://api.example.com/v1/users',
+    'headers': {
+        'Authorization': 'Bearer token123'
+    },
+    'response_parser': ['data', 'users']
+}
+
+source = Api(config=config)
+
+# Discover schema
+catalog = source.discover()
+
+# Load data
+for rows in source.load_data():
+    print(f"Loaded {len(rows)} records")
+```
+
+```yaml YAML Pipeline
+data_loader:
+  type: api
+  config:
+    url: https://api.example.com/v1/users
+    method: GET
+    headers:
+      Authorization: Bearer ${env:API_TOKEN}
+    response_parser:
+      - data
+      - users
+```
+</CodeGroup>
+
+## Salesforce
+
+Extract data from Salesforce using REST or Bulk API with OAuth or password authentication.
+
+### Configuration
+
+```json
+{
+  "client_id": "${env:SALESFORCE_CLIENT_ID}",
+  "client_secret": "${env:SALESFORCE_CLIENT_SECRET}",
+  "refresh_token": "${env:SALESFORCE_REFRESH_TOKEN}",
+  "start_date": "2024-01-01T00:00:00Z",
+  "api_type": "REST",
+  "select_fields_by_default": true
+}
+```
+
+### Bulk API (for large datasets)
+
+```json
+{
+  "client_id": "${env:SALESFORCE_CLIENT_ID}",
+  "client_secret": "${env:SALESFORCE_CLIENT_SECRET}",
+  "refresh_token": "${env:SALESFORCE_REFRESH_TOKEN}",
+  "start_date": "2024-01-01T00:00:00Z",
+  "api_type": "BULK",
+  "streams": ["Account", "Contact", "Opportunity", "Lead"]
+}
+```
+
+### Sandbox Environment
+
+```json
+{
+  "client_id": "${env:SALESFORCE_CLIENT_ID}",
+  "client_secret": "${env:SALESFORCE_CLIENT_SECRET}",
+  "refresh_token": "${env:SALESFORCE_REFRESH_TOKEN}",
+  "domain": "test",
+  "start_date": "2024-01-01T00:00:00Z"
+}
+```
+
+<CodeGroup>
+```python Python
+from mage_integrations.sources.salesforce import Salesforce
+
+config = {
+    'client_id': 'your_client_id',
+    'client_secret': 'your_client_secret',
+    'refresh_token': 'your_refresh_token',
+    'start_date': '2024-01-01T00:00:00Z'
+}
+
+source = Salesforce(config=config)
+
+# Discover objects
+catalog = source.discover()
+for stream in catalog.streams:
+    print(f"Object: {stream.tap_stream_id}")
+```
+</CodeGroup>
+
+## Stripe
+
+Extract payment, subscription, and customer data from Stripe.
+
+### Configuration
+
+```json
+{
+  "client_secret": "sk_live_${env:STRIPE_SECRET_KEY}",
+  "account_id": "acct_1234567890",
+  "start_date": "2024-01-01T00:00:00Z"
+}
+```
+
+### Available Streams
+
+- `charges` - Payment charges
+- `customers` - Customer data
+- `subscriptions` - Subscription data
+- `invoices` - Invoice data
+- `payment_intents` - Payment intents
+- `balance_transactions` - Balance transactions
+- `payouts` - Payout data
+- `products` - Product catalog
+- `plans` - Pricing plans
+- `coupons` - Discount coupons
+- `disputes` - Payment disputes
+
+<CodeGroup>
+```python Python
+from mage_integrations.sources.stripe import Stripe
+
+config = {
+    'client_secret': 'sk_test_...',
+    'account_id': 'acct_123',
+    'start_date': '2024-01-01T00:00:00Z'
+}
+
+source = Stripe(config=config)
+catalog = source.discover()
+
+# Select specific streams
+selected_streams = ['charges', 'customers', 'subscriptions']
+catalog = source.discover(streams=selected_streams)
+```
+</CodeGroup>
+
+## HubSpot
+
+Connect to HubSpot CRM and marketing platform.
+
+### Configuration
+
+```json
+{
+  "access_token": "${env:HUBSPOT_ACCESS_TOKEN}",
+  "start_date": "2024-01-01T00:00:00Z"
+}
+```
+
+### OAuth Configuration
+
+```json
+{
+  "client_id": "${env:HUBSPOT_CLIENT_ID}",
+  "client_secret": "${env:HUBSPOT_CLIENT_SECRET}",
+  "refresh_token": "${env:HUBSPOT_REFRESH_TOKEN}",
+  "start_date": "2024-01-01T00:00:00Z"
+}
+```
+
+### Available Streams
+
+- `contacts` - Contact records
+- `companies` - Company data
+- `deals` - Deal pipeline
+- `tickets` - Support tickets
+- `email_events` - Email engagement
+- `campaigns` - Marketing campaigns
+- `forms` - Form submissions
+
+## GitHub
+
+Extract repository, issue, and pull request data from GitHub.
+
+### Configuration
+
+```json
+{
+  "access_token": "${env:GITHUB_TOKEN}",
+  "repository": "owner/repo",
+  "start_date": "2024-01-01T00:00:00Z"
+}
+```
+
+### Multiple Repositories
+
+```json
+{
+  "access_token": "${env:GITHUB_TOKEN}",
+  "repositories": [
+    "mage-ai/mage-ai",
+    "mage-ai/mage-ai-terraform-templates"
+  ],
+  "start_date": "2024-01-01T00:00:00Z"
+}
+```
+
+### Available Streams
+
+- `commits` - Commit history
+- `issues` - Issues and PRs
+- `pull_requests` - Pull requests
+- `reviews` - PR reviews
+- `comments` - Issue/PR comments
+- `releases` - Release data
+- `stargazers` - Repository stars
+
+<CodeGroup>
+```python Python
+from mage_integrations.sources.github import Github
+
+config = {
+    'access_token': 'ghp_token123',
+    'repository': 'mage-ai/mage-ai',
+    'start_date': '2024-01-01T00:00:00Z'
+}
+
+source = Github(config=config)
+source.test_connection()
+catalog = source.discover()
+```
+</CodeGroup>
+
+## Google Sheets
+
+Extract data from Google Sheets using service account credentials.
+
+### Configuration
+
+```json
+{
+  "spreadsheet_id": "1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgvE2upms",
+  "path_to_credentials_json_file": "/path/to/service-account.json",
+  "selected_sheet_names": ["Sheet1", "Sheet2"]
+}
+```
+
+<Accordion title="Setup Google Sheets API">
+1. Go to [Google Cloud Console](https://console.cloud.google.com)
+2. Create a new project or select existing
+3. Enable Google Sheets API
+4. Create service account credentials
+5. Download JSON key file
+6. Share spreadsheet with service account email
+</Accordion>
+
+<CodeGroup>
+```python Python
+from mage_integrations.sources.google_sheets import GoogleSheets
+
+config = {
+    'spreadsheet_id': '1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgvE2upms',
+    'path_to_credentials_json_file': 'service-account.json'
+}
+
+source = GoogleSheets(config=config)
+catalog = source.discover()
+
+for stream in catalog.streams:
+    print(f"Sheet: {stream.tap_stream_id}")
+    for rows in source.load_data(stream):
+        print(f"Loaded {len(rows)} rows")
+```
+</CodeGroup>
+
+## Airtable
+
+Extract data from Airtable bases.
+
+### Configuration
+
+```json
+{
+  "api_key": "${env:AIRTABLE_API_KEY}",
+  "base_id": "appAbCdEfGhIjKlM",
+  "tables": ["Contacts", "Companies", "Deals"]
+}
+```
+
+## Marketing Platforms
+
+<AccordionGroup>
+  <Accordion title="Google Ads">
+    ```json
+    {
+      "developer_token": "${env:GOOGLE_ADS_DEVELOPER_TOKEN}",
+      "client_id": "${env:GOOGLE_ADS_CLIENT_ID}",
+      "client_secret": "${env:GOOGLE_ADS_CLIENT_SECRET}",
+      "refresh_token": "${env:GOOGLE_ADS_REFRESH_TOKEN}",
+      "customer_id": "1234567890",
+      "start_date": "2024-01-01"
+    }
+    ```
+  </Accordion>
+  
+  <Accordion title="Facebook Ads">
+    ```json
+    {
+      "access_token": "${env:FACEBOOK_ACCESS_TOKEN}",
+      "account_id": "act_1234567890",
+      "start_date": "2024-01-01T00:00:00Z"
+    }
+    ```
+  </Accordion>
+  
+  <Accordion title="LinkedIn Ads">
+    ```json
+    {
+      "access_token": "${env:LINKEDIN_ACCESS_TOKEN}",
+      "account_ids": ["123456", "789012"],
+      "start_date": "2024-01-01"
+    }
+    ```
+  </Accordion>
+  
+  <Accordion title="Twitter Ads">
+    ```json
+    {
+      "consumer_key": "${env:TWITTER_CONSUMER_KEY}",
+      "consumer_secret": "${env:TWITTER_CONSUMER_SECRET}",
+      "access_token": "${env:TWITTER_ACCESS_TOKEN}",
+      "access_token_secret": "${env:TWITTER_ACCESS_TOKEN_SECRET}",
+      "account_ids": ["abc123"]
+    }
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Analytics Platforms
+
+<AccordionGroup>
+  <Accordion title="Google Analytics">
+    ```json
+    {
+      "view_id": "12345678",
+      "path_to_credentials_json_file": "/path/to/service-account.json",
+      "start_date": "2024-01-01",
+      "end_date": "2024-03-01"
+    }
+    ```
+  </Accordion>
+  
+  <Accordion title="Google Search Console">
+    ```json
+    {
+      "site_url": "https://example.com",
+      "path_to_credentials_json_file": "/path/to/service-account.json",
+      "start_date": "2024-01-01"
+    }
+    ```
+  </Accordion>
+  
+  <Accordion title="Amplitude">
+    ```json
+    {
+      "api_key": "${env:AMPLITUDE_API_KEY}",
+      "secret_key": "${env:AMPLITUDE_SECRET_KEY}",
+      "start_date": "2024-01-01"
+    }
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Customer Support
+
+<AccordionGroup>
+  <Accordion title="Zendesk">
+    ```json
+    {
+      "subdomain": "company",
+      "email": "user@company.com",
+      "api_token": "${env:ZENDESK_API_TOKEN}",
+      "start_date": "2024-01-01T00:00:00Z"
+    }
+    ```
+  </Accordion>
+  
+  <Accordion title="Freshdesk">
+    ```json
+    {
+      "domain": "company.freshdesk.com",
+      "api_key": "${env:FRESHDESK_API_KEY}",
+      "start_date": "2024-01-01T00:00:00Z"
+    }
+    ```
+  </Accordion>
+  
+  <Accordion title="Intercom">
+    ```json
+    {
+      "access_token": "${env:INTERCOM_ACCESS_TOKEN}",
+      "start_date": "2024-01-01T00:00:00Z"
+    }
+    ```
+  </Accordion>
+  
+  <Accordion title="Front">
+    ```json
+    {
+      "api_token": "${env:FRONT_API_TOKEN}",
+      "start_date": "2024-01-01T00:00:00Z"
+    }
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## E-commerce & Payments
+
+<AccordionGroup>
+  <Accordion title="Chargebee">
+    ```json
+    {
+      "site": "company",
+      "api_key": "${env:CHARGEBEE_API_KEY}",
+      "start_date": "2024-01-01T00:00:00Z"
+    }
+    ```
+  </Accordion>
+  
+  <Accordion title="Paystack">
+    ```json
+    {
+      "secret_key": "${env:PAYSTACK_SECRET_KEY}",
+      "start_date": "2024-01-01T00:00:00Z"
+    }
+    ```
+  </Accordion>
+  
+  <Accordion title="Commercetools">
+    ```json
+    {
+      "project_key": "my-project",
+      "client_id": "${env:COMMERCETOOLS_CLIENT_ID}",
+      "client_secret": "${env:COMMERCETOOLS_CLIENT_SECRET}",
+      "region": "us-central1.gcp"
+    }
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Other SaaS Platforms
+
+<AccordionGroup>
+  <Accordion title="Pipedrive">
+    ```json
+    {
+      "api_token": "${env:PIPEDRIVE_API_TOKEN}",
+      "start_date": "2024-01-01T00:00:00Z"
+    }
+    ```
+  </Accordion>
+  
+  <Accordion title="Monday.com">
+    ```json
+    {
+      "api_token": "${env:MONDAY_API_TOKEN}",
+      "board_ids": ["123456789", "987654321"]
+    }
+    ```
+  </Accordion>
+  
+  <Accordion title="Datadog">
+    ```json
+    {
+      "api_key": "${env:DATADOG_API_KEY}",
+      "app_key": "${env:DATADOG_APP_KEY}",
+      "start_date": "2024-01-01T00:00:00Z"
+    }
+    ```
+  </Accordion>
+  
+  <Accordion title="Postmark">
+    ```json
+    {
+      "server_token": "${env:POSTMARK_SERVER_TOKEN}",
+      "start_date": "2024-01-01T00:00:00Z"
+    }
+    ```
+  </Accordion>
+  
+  <Accordion title="Outreach">
+    ```json
+    {
+      "client_id": "${env:OUTREACH_CLIENT_ID}",
+      "client_secret": "${env:OUTREACH_CLIENT_SECRET}",
+      "refresh_token": "${env:OUTREACH_REFRESH_TOKEN}",
+      "start_date": "2024-01-01T00:00:00Z"
+    }
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## BI & Analytics Tools
+
+<AccordionGroup>
+  <Accordion title="Tableau">
+    ```json
+    {
+      "server_url": "https://tableau.company.com",
+      "site_id": "site_name",
+      "token_name": "token_name",
+      "personal_access_token": "${env:TABLEAU_TOKEN}"
+    }
+    ```
+  </Accordion>
+  
+  <Accordion title="PowerBI">
+    ```json
+    {
+      "client_id": "${env:POWERBI_CLIENT_ID}",
+      "client_secret": "${env:POWERBI_CLIENT_SECRET}",
+      "tenant_id": "${env:POWERBI_TENANT_ID}"
+    }
+    ```
+  </Accordion>
+  
+  <Accordion title="Mode">
+    ```json
+    {
+      "account": "company",
+      "token": "${env:MODE_TOKEN}",
+      "password": "${env:MODE_PASSWORD}"
+    }
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Rate Limiting & Retries
+
+All API sources handle rate limiting automatically:
+
+```python
+config = {
+    'url': 'https://api.example.com/v1/data',
+    'headers': {'Authorization': 'Bearer token'},
+    'max_retries': 10,
+    'retry_backoff': 2  # exponential backoff
+}
+```
+
+## Installation
+
+```bash
+# Base installation includes generic API source
+pip install mage-ai
+
+# Install specific integrations
+pip install "mage-ai[airtable]"  # Airtable
+pip install "mage-ai[google-cloud-storage]"  # Google Sheets, Analytics
+
+# Install all integrations
+pip install "mage-ai[all]"
+```
+
+## Best Practices
+
+1. **Use OAuth tokens** when available instead of API keys
+2. **Set appropriate start dates** to limit historical data
+3. **Enable incremental sync** to reduce API calls
+4. **Monitor rate limits** in API provider dashboards
+5. **Use environment variables** for sensitive credentials
+6. **Test with small date ranges** before full syncs
+7. **Select specific streams** to minimize unnecessary data
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Cloud Storage" icon="folder" href="/integrations/sources/cloud-storage">
+    Load data from S3, GCS, and Azure Blob Storage
+  </Card>
+  <Card title="Streaming Sources" icon="bolt" href="/integrations/sources/streaming">
+    Real-time data from Kafka, Kinesis, and Pub/Sub
+  </Card>
+</CardGroup>

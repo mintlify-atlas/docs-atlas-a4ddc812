@@ -1,0 +1,547 @@
+---
+title: 'Pipeline Execution'
+description: 'Understanding pipeline execution modes and executors in Mage'
+icon: 'play'
+---
+
+## Execution Overview
+
+Mage provides flexible execution options for running pipelines and blocks across different compute environments. You can execute pipelines locally, on Kubernetes, AWS ECS, Google Cloud Run, Azure Container Instances, or PySpark clusters.
+
+## Execution Modes
+
+### Synchronous Execution
+
+Blocks execute in topological order based on dependencies. Each block waits for its upstream blocks to complete before starting.
+
+```python
+from mage_ai.data_preparation.models.pipeline import Pipeline
+
+# Load pipeline
+pipeline = Pipeline.get('my_pipeline', repo_path='/home/src/my_project')
+
+# Execute synchronously
+pipeline.execute_sync(
+    analyze_outputs=True,
+    global_vars={'env': 'production'},
+    run_tests=True
+)
+```
+
+### Asynchronous Execution
+
+Blocks can execute in parallel when their dependencies allow it.
+
+```python
+import asyncio
+
+# Execute pipeline asynchronously
+await pipeline.execute(
+    analyze_outputs=True,
+    global_vars={'env': 'production'},
+    parallel=True,
+    run_tests=True
+)
+```
+
+### In-Memory Caching
+
+Cache block outputs in memory for faster execution (useful for development).
+
+```python
+# Configure in metadata.yaml
+cache_block_output_in_memory: true
+
+# Or update programmatically
+await pipeline.update({
+    'cache_block_output_in_memory': True
+})
+```
+
+<Warning>
+  Enabling in-memory caching increases memory usage. Only use this for small to medium-sized datasets or during development.
+</Warning>
+
+## Executor Types
+
+Mage supports multiple executor types for running pipelines in different compute environments.
+
+### Local Python (Default)
+
+Execute blocks in the local Python environment.
+
+```python
+from mage_ai.data_preparation.models.constants import ExecutorType
+
+await pipeline.update({
+    'executor_type': ExecutorType.LOCAL_PYTHON
+})
+```
+
+**Use Cases:**
+- Local development
+- Small data pipelines
+- Testing and debugging
+
+### Kubernetes
+
+Execute blocks as Kubernetes pods.
+
+```python
+await pipeline.update({
+    'executor_type': ExecutorType.K8S,
+    'executor_config': {
+        'namespace': 'mage-prod',
+        'service_account_name': 'mage-executor',
+        'container_config': {
+            'image': 'mageai/mageai:latest',
+            'requests': {
+                'cpu': '500m',
+                'memory': '1Gi'
+            },
+            'limits': {
+                'cpu': '2000m',
+                'memory': '4Gi'
+            }
+        }
+    }
+})
+```
+
+**Configuration Options:**
+
+<CodeGroup>
+```yaml Basic Configuration
+executor_type: k8s
+executor_config:
+  namespace: mage
+  service_account_name: mage-k8s
+  container_config:
+    image: mageai/mageai:latest
+```
+
+```yaml With Resource Limits
+executor_type: k8s
+executor_config:
+  namespace: mage-prod
+  service_account_name: mage-k8s
+  container_config:
+    image: mageai/mageai:0.9.0
+    requests:
+      cpu: 1000m
+      memory: 2Gi
+    limits:
+      cpu: 4000m
+      memory: 8Gi
+```
+
+```yaml With Custom Labels
+executor_type: k8s
+executor_config:
+  namespace: mage
+  service_account_name: mage-k8s
+  container_config:
+    image: mageai/mageai:latest
+  pod_config:
+    labels:
+      app: mage
+      environment: production
+```
+</CodeGroup>
+
+### AWS ECS
+
+Execute blocks as AWS ECS tasks.
+
+```python
+await pipeline.update({
+    'executor_type': ExecutorType.ECS,
+    'executor_config': {
+        'task_definition': 'mage-executor-task',
+        'cluster': 'mage-cluster',
+        'cpu': '1024',
+        'memory': '2048',
+        'launch_type': 'FARGATE',
+        'assign_public_ip': 'ENABLED',
+        'subnets': [
+            'subnet-abc123',
+            'subnet-def456'
+        ],
+        'security_groups': [
+            'sg-xyz789'
+        ]
+    }
+})
+```
+
+**ECS Configuration:**
+
+```yaml
+executor_type: ecs
+executor_config:
+  task_definition: mage-executor
+  cluster: mage-prod-cluster
+  cpu: '2048'
+  memory: '4096'
+  launch_type: FARGATE
+  platform_version: 'LATEST'
+  assign_public_ip: 'ENABLED'
+  subnets:
+  - subnet-abc123
+  - subnet-def456
+  security_groups:
+  - sg-xyz789
+  tags:
+    Environment: production
+    Application: mage
+```
+
+### Google Cloud Run
+
+Execute blocks on Google Cloud Run.
+
+```python
+await pipeline.update({
+    'executor_type': ExecutorType.GCP_CLOUD_RUN,
+    'executor_config': {
+        'project_id': 'my-gcp-project',
+        'path_to_credentials_json_file': '/path/to/credentials.json',
+        'region': 'us-central1',
+        'cpu': '2',
+        'memory': '4Gi',
+        'timeout': '3600'
+    }
+})
+```
+
+**Cloud Run Configuration:**
+
+```yaml
+executor_type: gcp_cloud_run
+executor_config:
+  project_id: my-project-123
+  region: us-central1
+  path_to_credentials_json_file: /path/to/credentials.json
+  cpu: '4'
+  memory: '8Gi'
+  timeout: '3600'
+  max_instances: '10'
+  environment_variables:
+    ENV: production
+```
+
+### Azure Container Instances
+
+Execute blocks on Azure Container Instances.
+
+```python
+await pipeline.update({
+    'executor_type': ExecutorType.AZURE_CONTAINER_INSTANCE,
+    'executor_config': {
+        'resource_group': 'mage-resources',
+        'container_group_name': 'mage-executors',
+        'location': 'eastus',
+        'cpu': 2.0,
+        'memory': 4.0
+    }
+})
+```
+
+### PySpark
+
+Execute blocks on a Spark cluster.
+
+```python
+await pipeline.update({
+    'executor_type': ExecutorType.PYSPARK,
+    'executor_config': {
+        'spark_master': 'spark://spark-master:7077',
+        'spark_app_name': 'mage_pipeline',
+        'spark_jars': [
+            '/path/to/jdbc/driver.jar'
+        ]
+    },
+    'spark_config': {
+        'spark.executor.memory': '4g',
+        'spark.driver.memory': '2g',
+        'spark.executor.cores': '2',
+        'spark.sql.shuffle.partitions': '200'
+    }
+})
+```
+
+**PySpark Configuration:**
+
+```yaml
+type: pyspark
+executor_type: pyspark
+executor_config:
+  spark_master: spark://spark-master:7077
+  spark_app_name: my_etl_pipeline
+  
+spark_config:
+  spark.executor.memory: 8g
+  spark.driver.memory: 4g
+  spark.executor.cores: 4
+  spark.executor.instances: 10
+  spark.sql.shuffle.partitions: 400
+  spark.dynamicAllocation.enabled: true
+```
+
+## Block-Level Executors
+
+You can override the executor type for individual blocks:
+
+```python
+# Set block-specific executor
+block = pipeline.get_block('heavy_computation')
+block.executor_type = ExecutorType.K8S
+block.executor_config = {
+    'container_config': {
+        'image': 'mageai/mageai:latest',
+        'requests': {
+            'cpu': '4000m',
+            'memory': '16Gi'
+        }
+    }
+}
+
+await pipeline.save_async()
+```
+
+**In metadata.yaml:**
+
+```yaml
+blocks:
+- uuid: heavy_computation
+  type: transformer
+  language: python
+  executor_type: k8s
+  executor_config:
+    container_config:
+      image: mageai/mageai:latest
+      requests:
+        cpu: 4000m
+        memory: 16Gi
+      limits:
+        cpu: 8000m
+        memory: 32Gi
+```
+
+## Executor Factory
+
+The `ExecutorFactory` class determines the appropriate executor based on pipeline and block configuration:
+
+```python
+from mage_ai.data_preparation.executors.executor_factory import ExecutorFactory
+
+# Get pipeline executor
+pipeline_executor = ExecutorFactory.get_pipeline_executor(
+    pipeline=pipeline,
+    execution_partition='20240115',
+    executor_type=ExecutorType.K8S
+)
+
+# Execute pipeline
+pipeline_executor.execute(
+    global_vars={'env': 'production'},
+    pipeline_run_id=123
+)
+
+# Get block executor
+block_executor = ExecutorFactory.get_block_executor(
+    pipeline=pipeline,
+    block_uuid='my_block',
+    execution_partition='20240115',
+    executor_type=ExecutorType.ECS
+)
+
+# Execute block
+block_executor.execute(
+    block_run_id=456,
+    global_vars={'env': 'production'}
+)
+```
+
+## Retry Configuration
+
+Configure automatic retries for failed block executions:
+
+```python
+# Pipeline-level retry config
+await pipeline.update({
+    'retry_config': {
+        'retries': 3,
+        'delay': 5,
+        'max_delay': 60,
+        'exponential_backoff': True
+    }
+})
+
+# Block-level retry config (overrides pipeline config)
+block.retry_config = {
+    'retries': 5,
+    'delay': 10,
+    'max_delay': 300,
+    'exponential_backoff': True
+}
+```
+
+**Retry Configuration Options:**
+
+<ParamField path="retries" type="int">
+  Number of retry attempts (default: 0)
+</ParamField>
+
+<ParamField path="delay" type="int">
+  Initial delay between retries in seconds (default: 0)
+</ParamField>
+
+<ParamField path="max_delay" type="int">
+  Maximum delay between retries in seconds
+</ParamField>
+
+<ParamField path="exponential_backoff" type="bool">
+  Use exponential backoff for retry delays (default: False)
+</ParamField>
+
+## Concurrency Control
+
+Limit the number of blocks that execute simultaneously:
+
+```python
+await pipeline.update({
+    'concurrency_config': {
+        'block_run_limit': 5  # Max 5 blocks running at once
+    }
+})
+```
+
+## Execution Partitions
+
+Partitions help organize block outputs and logs for different pipeline runs:
+
+```python
+# Execute with partition
+result = block.execute_sync(
+    execution_partition='2024-01-15',
+    global_vars={'env': 'production'}
+)
+
+# Outputs are stored with partition:
+# .variables/pipelines/my_pipeline/2024-01-15/my_block/output_0
+```
+
+## Environment Variables
+
+Access global variables in block code:
+
+```python
+@data_loader
+def load_data(*args, **kwargs):
+    """
+    Access execution context via kwargs.
+    """
+    # Get execution date
+    execution_date = kwargs.get('execution_date')
+    
+    # Get environment
+    env = kwargs.get('env', 'development')
+    
+    # Get custom variables
+    region = kwargs.get('region', 'us-west-2')
+    
+    print(f'Loading data for {execution_date} in {env} environment')
+    
+    return data
+```
+
+## Streaming Pipeline Execution
+
+Streaming pipelines run continuously:
+
+```python
+# Create streaming pipeline with multiple executors
+streaming_pipeline = Pipeline.create(
+    name='kafka_stream',
+    pipeline_type=PipelineType.STREAMING,
+    repo_path='/home/src/my_project'
+)
+
+# Set executor count for parallel stream processing
+await streaming_pipeline.update({
+    'executor_count': 3  # Launch 3 executors in parallel
+})
+```
+
+Streaming pipelines use `StreamingPipelineExecutor`:
+
+```python
+from mage_ai.data_preparation.executors.streaming_pipeline_executor import (
+    StreamingPipelineExecutor
+)
+
+executor = StreamingPipelineExecutor(streaming_pipeline)
+executor.execute(
+    global_vars={'env': 'production'},
+    build_block_output_stdout=lambda x: print(x)
+)
+```
+
+## Best Practices
+
+<Tip>
+  **Use Appropriate Executors**
+  
+  - **Local**: Development and small pipelines
+  - **Kubernetes**: Production workloads with auto-scaling
+  - **ECS/Cloud Run**: Serverless execution for variable workloads
+  - **PySpark**: Large-scale data processing
+</Tip>
+
+<Note>
+  **Resource Configuration**
+  
+  Always configure appropriate CPU and memory limits for cloud executors to optimize cost and performance.
+</Note>
+
+<Warning>
+  **Executor Consistency**
+  
+  Ensure all executors have access to the same code, dependencies, and environment variables. Use container images with all required packages.
+</Warning>
+
+## Monitoring Execution
+
+```python
+from mage_ai.orchestration.db.models.schedules import PipelineRun
+
+# Get pipeline run
+pipeline_run = PipelineRun.query.get(123)
+
+# Check status
+print(f'Status: {pipeline_run.status}')
+print(f'Started: {pipeline_run.started_at}')
+print(f'Completed: {pipeline_run.completed_at}')
+
+# Get block runs
+for block_run in pipeline_run.block_runs:
+    print(f'{block_run.block_uuid}: {block_run.status}')
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Scheduling" icon="clock" href="/pipelines/scheduling">
+    Schedule pipelines with triggers
+  </Card>
+  <Card title="Dynamic Blocks" icon="layer-group" href="/pipelines/dynamic-blocks">
+    Parallel execution with dynamic blocks
+  </Card>
+  <Card title="Monitoring" icon="chart-line" href="/orchestration/monitoring">
+    Monitor pipeline execution
+  </Card>
+  <Card title="Optimization" icon="gauge-high" href="/guides/best-practices/performance">
+    Optimize pipeline performance
+  </Card>
+</CardGroup>

@@ -1,0 +1,144 @@
+---
+title: "Compute Integrations"
+sidebarTitle: "Overview"
+icon: "server"
+description: "Scale Mage pipelines with distributed compute engines and container orchestration platforms"
+---
+
+Mage supports multiple compute integrations to scale your data pipelines beyond local execution. Execute blocks and pipelines on distributed compute engines, container orchestration platforms, and cloud-native services.
+
+## Available Executors
+
+Mage provides several executor types for running pipelines and blocks:
+
+<CardGroup cols={2}>
+  <Card title="Spark (PySpark)" icon="sparkles" href="/integrations/compute/spark">
+    Run PySpark pipelines on AWS EMR clusters with automatic cluster management
+  </Card>
+  
+  <Card title="Kubernetes" icon="dharmachakra" href="/integrations/compute/kubernetes">
+    Execute pipelines and blocks as Kubernetes Jobs with full resource control
+  </Card>
+  
+  <Card title="AWS ECS" icon="aws" href="/deployment/cloud-providers">
+    Run blocks as ECS tasks on AWS Fargate or EC2
+  </Card>
+  
+  <Card title="GCP Cloud Run" icon="google" href="/deployment/cloud-providers">
+    Execute blocks on GCP Cloud Run with serverless container execution
+  </Card>
+</CardGroup>
+
+## Executor Types
+
+Mage supports the following executor types defined in the codebase:
+
+| Executor Type | Description | Use Case |
+|--------------|-------------|----------|
+| `local_python` | Local Python execution (default) | Development and testing |
+| `pyspark` | PySpark execution on AWS EMR | Large-scale data processing with Spark |
+| `k8s` | Kubernetes Job execution | Container orchestration and resource isolation |
+| `ecs` | AWS ECS task execution | AWS-native container execution |
+| `gcp_cloud_run` | GCP Cloud Run execution | Serverless containers on GCP |
+| `azure_container_instance` | Azure Container Instance execution | Serverless containers on Azure |
+
+## Configuration Levels
+
+Executor configuration can be set at multiple levels with the following precedence:
+
+<Steps>
+  <Step title="Project Level">
+    Configure default executors in your project's `metadata.yaml` file. This applies to all pipelines and blocks unless overridden.
+    
+    ```yaml
+    # Project metadata.yaml
+    k8s_executor_config:
+      resource_requests:
+        cpu: "500m"
+        memory: "512Mi"
+    ```
+  </Step>
+  
+  <Step title="Pipeline Level">
+    Override executor configuration in a pipeline's `metadata.yaml` file.
+    
+    ```yaml
+    # Pipeline metadata.yaml
+    executor_type: k8s
+    executor_config:
+      resource_requests:
+        cpu: "1000m"
+        memory: "2Gi"
+    ```
+  </Step>
+  
+  <Step title="Block Level">
+    Configure executor settings for individual blocks in their YAML configuration.
+    
+    ```yaml
+    # Block configuration
+    executor_type: k8s
+    executor_config:
+      resource_requests:
+        cpu: "2000m"
+        memory: "4Gi"
+    ```
+  </Step>
+</Steps>
+
+<Note>
+Block-level configuration takes highest precedence, followed by pipeline-level, then project-level configuration.
+</Note>
+
+## Setting Default Executor Type
+
+You can set a default executor type for all pipelines using the `DEFAULT_EXECUTOR_TYPE` environment variable:
+
+```bash
+export DEFAULT_EXECUTOR_TYPE=k8s
+```
+
+This will use the specified executor type for all pipelines unless overridden at the pipeline or block level.
+
+## Executor Factory
+
+Mage uses an executor factory pattern to dynamically create the appropriate executor based on:
+
+1. **Pipeline type**: PySpark pipelines automatically use the `pyspark` executor
+2. **Explicit configuration**: Executor type specified in metadata
+3. **Default executor**: Set via `DEFAULT_EXECUTOR_TYPE` environment variable
+4. **Fallback**: Falls back to `local_python` if no configuration is found
+
+From the source code at `mage_ai/data_preparation/executors/executor_factory.py`:
+
+<CodeGroup>
+```python Pipeline Executor Selection
+if pipeline.type == PipelineType.PYSPARK:
+    executor_type = ExecutorType.PYSPARK
+else:
+    executor_type = pipeline.get_executor_type()
+    if executor_type == ExecutorType.LOCAL_PYTHON or executor_type is None:
+        executor_type = DEFAULT_EXECUTOR_TYPE
+```
+
+```python Block Executor Selection
+if pipeline.type == PipelineType.PYSPARK and is_pyspark_code(block.content):
+    executor_type = ExecutorType.PYSPARK
+else:
+    executor_type = block.get_executor_type()
+    if executor_type == ExecutorType.LOCAL_PYTHON or not executor_type:
+        executor_type = DEFAULT_EXECUTOR_TYPE
+```
+</CodeGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Spark Integration" icon="sparkles" href="/integrations/compute/spark">
+    Configure PySpark execution on AWS EMR clusters
+  </Card>
+  
+  <Card title="Kubernetes Integration" icon="dharmachakra" href="/integrations/compute/kubernetes">
+    Set up Kubernetes Job execution for scalable pipeline runs
+  </Card>
+</CardGroup>

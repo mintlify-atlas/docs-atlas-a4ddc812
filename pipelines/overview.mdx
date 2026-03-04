@@ -1,0 +1,273 @@
+---
+title: 'Pipeline Overview'
+description: 'Understanding Mage pipelines and their types'
+icon: 'diagram-project'
+---
+
+## What is a Pipeline?
+
+A **Pipeline** in Mage is a directed acyclic graph (DAG) of blocks that define your data workflow. Each pipeline consists of blocks that load, transform, and export data, with dependencies between them determining the execution order.
+
+## Pipeline Types
+
+Mage supports multiple pipeline types for different use cases:
+
+### Standard (Python/Batch)
+
+Standard pipelines are the most common type, designed for batch data processing workflows.
+
+```python
+from mage_ai.data_preparation.models.pipeline import Pipeline
+from mage_ai.data_preparation.models.constants import PipelineType
+
+# Create a standard batch pipeline
+pipeline = Pipeline.create(
+    name='my_batch_pipeline',
+    pipeline_type=PipelineType.PYTHON,
+    repo_path='/path/to/repo',
+    description='Process daily batch data',
+    tags=['batch', 'daily']
+)
+```
+
+**Key Features:**
+- Execute blocks in topological order based on dependencies
+- Support for parallel and sequential execution
+- Retry logic and error handling
+- Schedule-based execution
+
+### Streaming
+
+Streaming pipelines process data in real-time from streaming sources.
+
+```python
+pipeline = Pipeline.create(
+    name='realtime_events',
+    pipeline_type=PipelineType.STREAMING,
+    repo_path='/path/to/repo',
+    description='Process streaming events'
+)
+```
+
+**Key Features:**
+- Continuous data processing
+- Multiple executor support (`executor_count` for parallel streams)
+- Integration with Kafka, Kinesis, and other streaming platforms
+- Real-time transformations
+
+### Integration
+
+Data integration pipelines for ELT (Extract, Load, Transform) workflows.
+
+```python
+pipeline = Pipeline.create(
+    name='postgres_to_snowflake',
+    pipeline_type=PipelineType.INTEGRATION,
+    repo_path='/path/to/repo',
+    description='Sync data from PostgreSQL to Snowflake'
+)
+```
+
+**Key Features:**
+- Pre-built source and destination connectors
+- Stream-based data synchronization
+- Catalog and schema management
+- Incremental sync support
+
+### PySpark
+
+PySpark pipelines for distributed big data processing on Spark clusters.
+
+```python
+pipeline = Pipeline.create(
+    name='large_scale_etl',
+    pipeline_type=PipelineType.PYSPARK,
+    repo_path='/path/to/repo',
+    description='Process large datasets with Spark'
+)
+```
+
+**Key Features:**
+- Distributed data processing
+- Spark DataFrame operations
+- EMR/Databricks integration
+- Scalable transformations
+
+### Databricks
+
+Optimized for Databricks environments.
+
+```python
+pipeline = Pipeline.create(
+    name='databricks_workflow',
+    pipeline_type=PipelineType.DATABRICKS,
+    repo_path='/path/to/repo',
+    description='Run on Databricks cluster'
+)
+```
+
+## Pipeline Configuration
+
+### metadata.yaml Structure
+
+Every pipeline has a `metadata.yaml` file that stores its configuration:
+
+```yaml
+blocks:
+- all_upstream_blocks_executed: true
+  color: null
+  configuration: {}
+  downstream_blocks:
+  - transformer_block
+  executor_config: null
+  executor_type: local_python
+  groups: []
+  has_callback: false
+  language: python
+  name: load_data
+  retry_config: null
+  status: executed
+  timeout: null
+  type: data_loader
+  upstream_blocks: []
+  uuid: load_data
+
+cache_block_output_in_memory: false
+concurrency_config: {}
+created_at: '2024-01-15 10:30:00.123456+00:00'
+description: My batch ETL pipeline
+executor_config: {}
+executor_count: 1
+executor_type: local_python
+name: my_batch_pipeline
+notification_config: {}
+retry_config: {}
+run_pipeline_in_one_process: false
+type: python
+uuid: my_batch_pipeline
+tags:
+- production
+- daily
+variables: {}
+```
+
+## Pipeline Properties
+
+### Core Properties
+
+<ParamField path="uuid" type="string">
+  Unique identifier for the pipeline (automatically generated from the name)
+</ParamField>
+
+<ParamField path="name" type="string">
+  Human-readable name of the pipeline
+</ParamField>
+
+<ParamField path="type" type="PipelineType">
+  Type of pipeline: `python`, `streaming`, `integration`, `pyspark`, or `databricks`
+</ParamField>
+
+<ParamField path="description" type="string">
+  Optional description explaining the pipeline's purpose
+</ParamField>
+
+<ParamField path="tags" type="List[str]">
+  List of tags for organizing and filtering pipelines
+</ParamField>
+
+### Execution Properties
+
+<ParamField path="executor_type" type="ExecutorType">
+  Execution environment: `local_python`, `k8s`, `ecs`, `gcp_cloud_run`, `azure_container_instance`, or `pyspark`
+</ParamField>
+
+<ParamField path="executor_config" type="Dict">
+  Configuration for the executor (cluster settings, resource limits, etc.)
+</ParamField>
+
+<ParamField path="executor_count" type="int">
+  Number of executors to launch (used for streaming pipelines)
+</ParamField>
+
+<ParamField path="concurrency_config" type="Dict">
+  Settings for controlling concurrent block execution
+</ParamField>
+
+<ParamField path="retry_config" type="Dict">
+  Default retry settings for block execution failures
+</ParamField>
+
+### Advanced Properties
+
+<ParamField path="cache_block_output_in_memory" type="bool">
+  Cache block outputs in memory instead of writing to disk (faster but more memory-intensive)
+</ParamField>
+
+<ParamField path="run_pipeline_in_one_process" type="bool">
+  Run entire pipeline in a single process (useful for debugging)
+</ParamField>
+
+<ParamField path="settings" type="PipelineSettings">
+  Additional pipeline settings for triggers, notifications, and runtime behavior
+</ParamField>
+
+## Pipeline Methods
+
+### Get Pipeline
+
+```python
+from mage_ai.data_preparation.models.pipeline import Pipeline
+
+# Get an existing pipeline
+pipeline = Pipeline.get('my_pipeline_uuid', repo_path='/path/to/repo')
+
+# Access pipeline properties
+print(pipeline.name)
+print(pipeline.type)
+print(pipeline.blocks_by_uuid)
+```
+
+### List All Pipelines
+
+```python
+# Get all pipelines in the repository
+pipeline_uuids = Pipeline.get_all_pipelines(repo_path='/path/to/repo')
+
+for uuid in pipeline_uuids:
+    pipeline = Pipeline.get(uuid, repo_path='/path/to/repo')
+    print(f"{pipeline.name} ({pipeline.type})")
+```
+
+### Check Pipeline Exists
+
+```python
+if Pipeline.exists('my_pipeline', repo_path='/path/to/repo'):
+    print('Pipeline exists')
+```
+
+## Pipeline Structure
+
+```
+pipelines/
+└── my_pipeline/
+    ├── metadata.yaml              # Pipeline configuration
+    ├── __init__.py               # Python package marker
+    └── data_integration_catalog.json  # For integration pipelines
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Creating Pipelines" icon="plus" href="/pipelines/creating-pipelines">
+    Learn how to create different types of pipelines
+  </Card>
+  <Card title="Blocks" icon="cube" href="/pipelines/blocks">
+    Understand the building blocks of pipelines
+  </Card>
+  <Card title="Execution" icon="play" href="/pipelines/execution">
+    Configure how pipelines execute
+  </Card>
+  <Card title="Scheduling" icon="clock" href="/pipelines/scheduling">
+    Schedule pipelines with triggers
+  </Card>
+</CardGroup>

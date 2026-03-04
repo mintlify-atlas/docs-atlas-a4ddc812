@@ -1,0 +1,183 @@
+---
+title: 'Data Integrations Overview'
+description: 'Connect Mage to hundreds of data sources and destinations'
+---
+
+Mage provides a powerful data integration framework that allows you to sync data from various sources to multiple destinations. Built on the Singer specification, Mage integrations support both batch and streaming data pipelines.
+
+## How It Works
+
+Mage's data integration system follows a simple pattern:
+
+1. **Source** - Extract data from databases, APIs, file storage, or SaaS platforms
+2. **Transform** (optional) - Apply transformations using Python, SQL, or dbt
+3. **Destination** - Load data into your target data warehouse or database
+
+<Note>
+Mage integrations use the Singer protocol internally, which provides a standard for moving data between systems using JSON-formatted messages.
+</Note>
+
+## Replication Methods
+
+Mage supports multiple replication strategies to optimize your data syncs:
+
+<CardGroup cols={3}>
+  <Card title="Full Table" icon="table">
+    Replicate entire tables on each sync. Best for small tables or complete refreshes.
+  </Card>
+  <Card title="Incremental" icon="arrow-up-right-dots">
+    Sync only new or updated records based on a replication key (e.g., `updated_at` timestamp).
+  </Card>
+  <Card title="Log-Based (CDC)" icon="scroll">
+    Capture changes from database logs for real-time data replication (PostgreSQL, MySQL).
+  </Card>
+</CardGroup>
+
+## Key Features
+
+### Wide Integration Support
+
+Connect to 50+ data sources and 25+ destinations including:
+
+- **Databases**: PostgreSQL, MySQL, BigQuery, Snowflake, Redshift, MongoDB
+- **Cloud Storage**: Amazon S3, Google Cloud Storage, Azure Blob Storage
+- **SaaS Applications**: Stripe, Salesforce, HubSpot, Zendesk, Google Analytics
+- **APIs**: Custom REST APIs with flexible configuration
+
+### Schema Detection
+
+Mage automatically discovers tables and columns from your data sources, generating schemas that can be customized before syncing.
+
+```python
+from mage_integrations.sources.postgresql import PostgreSQL
+
+source = PostgreSQL(
+    config={
+        'host': 'localhost',
+        'database': 'production',
+        'schema': 'public',
+        'username': 'mage',
+        'password': 'password',
+        'port': 5432,
+    }
+)
+
+# Discover available tables and schemas
+catalog = source.discover()
+```
+
+### Flexible Configuration
+
+Configure integrations using Python dictionaries or YAML files:
+
+```yaml
+source:
+  name: PostgreSQL
+  config:
+    host: localhost
+    database: production
+    schema: public
+    username: mage
+    password: ${POSTGRES_PASSWORD}
+
+destination:
+  name: BigQuery
+  config:
+    project_id: my-project
+    dataset: analytics
+    path_to_credentials_json_file: /path/to/credentials.json
+```
+
+## Architecture
+
+Mage's integration framework is built on these core components:
+
+<Accordion title="Source Connectors">
+Extract data from external systems. Each source implements:
+- **Connection management** - Establish and maintain connections
+- **Discovery** - Detect available tables/streams and their schemas
+- **Data extraction** - Read data in batches or streams
+- **Bookmarking** - Track sync progress and resume from failures
+</Accordion>
+
+<Accordion title="Destination Connectors">
+Load data into target systems. Each destination handles:
+- **Schema creation** - Automatically create tables if they don't exist
+- **Type mapping** - Convert data types between systems
+- **Conflict resolution** - Handle duplicate records (upsert, update, or ignore)
+- **Batch loading** - Optimize writes using bulk operations
+</Accordion>
+
+<Accordion title="Catalog & Schema">
+The catalog defines which streams to sync and how:
+- **Stream selection** - Choose which tables/endpoints to replicate
+- **Field selection** - Pick specific columns to sync
+- **Replication method** - Set full table, incremental, or log-based
+- **Primary keys** - Define unique constraints
+</Accordion>
+
+## Installation
+
+Install Mage with specific integrations:
+
+```bash
+# Install Mage with all integrations
+pip install "mage-ai[all]"
+
+# Install specific integrations
+pip install "mage-ai[postgres,bigquery,snowflake]"
+
+# Install streaming integrations
+pip install "mage-ai[streaming]"
+```
+
+## Quick Start
+
+<Steps>
+  <Step title="Configure Source">
+    Create a source configuration with connection details:
+    
+    ```python
+    source_config = {
+        'host': 'postgres.example.com',
+        'database': 'production',
+        'schema': 'public',
+        'username': 'readonly_user',
+        'password': 'secure_password',
+    }
+    ```
+  </Step>
+  
+  <Step title="Configure Destination">
+    Set up your destination configuration:
+    
+    ```python
+    destination_config = {
+        'project_id': 'my-gcp-project',
+        'dataset': 'raw_data',
+        'path_to_credentials_json_file': './gcp-credentials.json',
+    }
+    ```
+  </Step>
+  
+  <Step title="Create Pipeline">
+    Use Mage's UI or Python API to create a data integration pipeline that syncs your data.
+  </Step>
+</Steps>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Available Sources" icon="database" href="/integrations/sources">
+    Browse all supported data sources
+  </Card>
+  <Card title="Available Destinations" icon="warehouse" href="/integrations/destinations">
+    Explore destination options
+  </Card>
+  <Card title="Custom Integrations" icon="code" href="/integrations/custom-integrations">
+    Build your own connectors
+  </Card>
+  <Card title="Configuration Guide" icon="gear" href="/deployment/configuration">
+    Advanced configuration options
+  </Card>
+</CardGroup>

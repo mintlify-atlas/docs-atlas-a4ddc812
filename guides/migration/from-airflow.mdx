@@ -1,0 +1,572 @@
+---
+title: Migrating from Airflow to Mage
+description: Complete guide to migrating your Apache Airflow workflows to Mage pipelines
+---
+
+## Overview
+
+This guide helps you migrate from Apache Airflow to Mage. While both are orchestration tools, Mage offers a modern, notebook-style interface with modular blocks that simplify pipeline development.
+
+## Key Concept Mapping
+
+### Core Components
+
+| Airflow | Mage | Notes |
+|---------|------|-------|
+| DAG | Pipeline | Workflows are defined in YAML config files |
+| Task | Block | Self-contained units of logic with typed inputs/outputs |
+| Operator | Block Type | Built-in block types: data_loader, transformer, data_exporter |
+| XCom | Block Output Variables | Automatic variable passing between blocks |
+| TaskGroup | Pipeline | Nested workflows using pipeline blocks |
+| Sensor | Sensor Block | Built-in sensor block type |
+| Connection | IO Config | Configuration profiles for data sources |
+
+### Scheduling & Execution
+
+| Airflow | Mage | Notes |
+|---------|------|-------|
+| Schedule Interval | Trigger Schedule | Cron expressions or predefined intervals |
+| Execution Date | Pipeline Run | Each execution creates a pipeline run record |
+| Executor | Executor Type | Local, Kubernetes, ECS, Cloud Run, PySpark |
+| Pool | Concurrency Config | Block-level concurrency limits |
+| SLA | SLA (seconds) | Pipeline and block-level SLA monitoring |
+| Retry Logic | Retry Config | Configurable retries with exponential backoff |
+
+## Migration Steps
+
+### 1. Understanding Pipeline Structure
+
+<CodeGroup>
+```python Airflow DAG
+# dags/my_dag.py
+from airflow import DAG
+from airflow.operators.python import PythonOperator
+from datetime import datetime, timedelta
+
+default_args = {
+    'owner': 'data-team',
+    'retries': 3,
+    'retry_delay': timedelta(minutes=5),
+}
+
+with DAG(
+    dag_id='user_analytics',
+    default_args=default_args,
+    schedule_interval='0 2 * * *',
+    start_date=datetime(2024, 1, 1),
+    catchup=False,
+) as dag:
+    
+    def extract_users(**context):
+        # Extract logic
+        return users_data
+    
+    def transform_users(ti):
+        users = ti.xcom_pull(task_ids='extract')
+        # Transform logic
+        return transformed_data
+    
+    def load_to_warehouse(ti):
+        data = ti.xcom_pull(task_ids='transform')
+        # Load logic
+        pass
+    
+    extract = PythonOperator(
+        task_id='extract',
+        python_callable=extract_users
+    )
+    
+    transform = PythonOperator(
+        task_id='transform',
+        python_callable=transform_users
+    )
+    
+    load = PythonOperator(
+        task_id='load',
+        python_callable=load_to_warehouse
+    )
+    
+    extract >> transform >> load
+```
+
+```yaml Mage Pipeline (metadata.yaml)
+blocks:
+- uuid: extract_users
+  type: data_loader
+  upstream_blocks: []
+  downstream_blocks:
+  - transform_users
+  language: python
+  retry_config:
+    retries: 3
+    delay: 300
+    
+- uuid: transform_users
+  type: transformer
+  upstream_blocks:
+  - extract_users
+  downstream_blocks:
+  - load_to_warehouse
+  language: python
+  
+- uuid: load_to_warehouse
+  type: data_exporter
+  upstream_blocks:
+  - transform_users
+  downstream_blocks: []
+  language: python
+
+name: user_analytics
+type: python
+executor_type: local_python
+```
+
+```python Mage Block: extract_users.py
+from mage_ai.io.postgres import Postgres
+from pandas import DataFrame
+
+if 'data_loader' not in globals():
+    from mage_ai.data_preparation.decorators import data_loader
+
+@data_loader
+def load_data(*args, **kwargs) -> DataFrame:
+    """
+    Extract users from database.
+    """
+    query = 'SELECT * FROM users WHERE created_at >= NOW() - INTERVAL \'1 day\''
+    
+    config = {
+        'host': 'localhost',
+        'port': 5432,
+        'database': 'production',
+    }
+    
+    return Postgres.with_config(config).load(query)
+```
+
+```python Mage Block: transform_users.py
+from pandas import DataFrame
+
+if 'transformer' not in globals():
+    from mage_ai.data_preparation.decorators import transformer
+
+@transformer
+def transform(data: DataFrame, *args, **kwargs) -> DataFrame:
+    """
+    Transform user data - automatic input from upstream blocks.
+    """
+    # Add computed columns
+    data['full_name'] = data['first_name'] + ' ' + data['last_name']
+    data['signup_date'] = data['created_at'].dt.date
+    
+    # Filter active users
+    return data[data['is_active'] == True]
+```
+
+```python Mage Block: load_to_warehouse.py
+from mage_ai.io.snowflake import Snowflake
+from pandas import DataFrame
+
+if 'data_exporter' not in globals():
+    from mage_ai.data_preparation.decorators import data_exporter
+
+@data_exporter
+def export_data(data: DataFrame, **kwargs) -> None:
+    """
+    Export data to Snowflake warehouse.
+    """
+    config = {
+        'account': 'my_account',
+        'warehouse': 'COMPUTE_WH',
+        'database': 'ANALYTICS',
+        'schema': 'PUBLIC',
+    }
+    
+    Snowflake.with_config(config).export(
+        data,
+        table_name='users_processed',
+        if_exists='replace',
+    )
+```
+</CodeGroup>
+
+### 2. Scheduling and Triggers
+
+<Tabs>
+  <Tab title="Airflow">
+    ```python
+    # In DAG definition
+    with DAG(
+        dag_id='daily_pipeline',
+        schedule_interval='0 2 * * *',  # 2 AM daily
+        start_date=datetime(2024, 1, 1),
+        catchup=False,
+        max_active_runs=1,
+    ) as dag:
+        pass
+    ```
+  </Tab>
+  <Tab title="Mage UI">
+    Create a trigger via the Mage UI:
+    
+    1. Open your pipeline
+    2. Click "Triggers" in the sidebar
+    3. Click "+ New trigger"
+    4. Configure:
+       - Name: `daily_at_2am`
+       - Type: `Schedule`
+       - Frequency: `Daily`
+       - Start time: `02:00`
+       - Status: `Active`
+  </Tab>
+  <Tab title="Mage Python API">
+    ```python
+    # In a script or notebook
+    from mage_ai.data_preparation.models.pipeline import Pipeline
+    from mage_ai.orchestration.db.models.schedules import PipelineSchedule
+    
+    pipeline = Pipeline.get('user_analytics')
+    
+    PipelineSchedule.create(
+        name='daily_at_2am',
+        pipeline_uuid='user_analytics',
+        schedule_type='time',
+        schedule_interval='0 2 * * *',
+        status='active',
+        variables={},  # Runtime variables
+    )
+    ```
+  </Tab>
+</Tabs>
+
+### 3. Variable and Parameter Handling
+
+<CodeGroup>
+```python Airflow - Using Variables
+from airflow.models import Variable
+
+def my_task(**context):
+    # Access Airflow Variables
+    api_key = Variable.get('api_key')
+    env = Variable.get('environment', default_var='dev')
+    
+    # Access execution context
+    execution_date = context['execution_date']
+    dag_run = context['dag_run']
+    params = dag_run.conf or {}
+```
+
+```python Mage - Using Variables
+# Variables are automatically available via kwargs
+@data_loader
+def load_data(*args, **kwargs) -> DataFrame:
+    # Access pipeline variables (set in UI or trigger)
+    api_key = kwargs.get('api_key')
+    env = kwargs.get('env', 'dev')
+    
+    # Access execution metadata
+    execution_date = kwargs.get('execution_date')
+    pipeline_uuid = kwargs.get('pipeline_uuid')
+    block_uuid = kwargs.get('block_uuid')
+    
+    # Access environment variables
+    import os
+    secret_key = os.getenv('SECRET_KEY')
+    
+    return data
+```
+</CodeGroup>
+
+### 4. Conditional Logic
+
+<CodeGroup>
+```python Airflow - BranchPythonOperator
+from airflow.operators.python import BranchPythonOperator
+
+def choose_branch(**context):
+    if condition:
+        return 'task_a'
+    else:
+        return 'task_b'
+
+branch = BranchPythonOperator(
+    task_id='branch',
+    python_callable=choose_branch
+)
+
+task_a = PythonOperator(task_id='task_a', ...)
+task_b = PythonOperator(task_id='task_b', ...)
+
+branch >> [task_a, task_b]
+```
+
+```python Mage - Conditional Blocks
+# Create a conditional block that returns True/False
+@data_loader
+def check_condition(*args, **kwargs) -> bool:
+    """
+    Conditional block that determines if downstream should run.
+    """
+    data = load_some_data()
+    return len(data) > 0
+
+# In metadata.yaml, mark the block as type: conditional
+# Downstream blocks only run if condition returns True
+```
+
+```yaml Pipeline Config with Conditionals
+blocks:
+- uuid: check_data_exists
+  type: conditional
+  upstream_blocks: []
+  downstream_blocks:
+  - process_data
+  
+- uuid: process_data
+  type: transformer
+  upstream_blocks:
+  - check_data_exists  # Only runs if condition is True
+  downstream_blocks: []
+```
+</CodeGroup>
+
+### 5. Sensors and Dependencies
+
+<CodeGroup>
+```python Airflow - S3 Sensor
+from airflow.providers.amazon.aws.sensors.s3 import S3KeySensor
+
+wait_for_file = S3KeySensor(
+    task_id='wait_for_file',
+    bucket_name='my-bucket',
+    bucket_key='data/input.csv',
+    poke_interval=60,
+    timeout=3600,
+)
+
+process_file = PythonOperator(...)
+
+wait_for_file >> process_file
+```
+
+```python Mage - Sensor Block
+from mage_ai.io.s3 import S3
+import os
+import time
+
+if 'sensor' not in globals():
+    from mage_ai.data_preparation.decorators import sensor
+
+@sensor
+def check_file_exists(*args, **kwargs) -> bool:
+    """
+    Sensor that waits for S3 file to exist.
+    """
+    s3 = S3(
+        aws_access_key_id=os.getenv('AWS_ACCESS_KEY_ID'),
+        aws_secret_access_key=os.getenv('AWS_SECRET_ACCESS_KEY'),
+    )
+    
+    return s3.exists(
+        'my-bucket',
+        'data/input.csv'
+    )
+```
+
+```yaml Sensor Configuration
+blocks:
+- uuid: wait_for_file
+  type: sensor
+  upstream_blocks: []
+  downstream_blocks:
+  - process_file
+  timeout: 3600  # 1 hour timeout
+  retry_config:
+    retries: 60
+    delay: 60  # Check every minute
+```
+</CodeGroup>
+
+## Advanced Features
+
+### Dynamic Task Mapping (Airflow) vs Dynamic Blocks (Mage)
+
+<CodeGroup>
+```python Airflow - Dynamic Tasks
+from airflow.decorators import task
+
+@task
+def get_partitions():
+    return ['2024-01', '2024-02', '2024-03']
+
+@task
+def process_partition(partition: str):
+    # Process single partition
+    pass
+
+partitions = get_partitions()
+process_partition.expand(partition=partitions)
+```
+
+```python Mage - Dynamic Blocks
+@data_loader
+def load_partitions(*args, **kwargs) -> list:
+    """
+    Return list of partitions to process dynamically.
+    """
+    return [
+        {'partition': '2024-01'},
+        {'partition': '2024-02'},
+        {'partition': '2024-03'},
+    ]
+
+# Mark this block as dynamic in configuration
+# Downstream blocks automatically run once per partition
+```
+
+```yaml Dynamic Block Configuration
+blocks:
+- uuid: load_partitions
+  type: data_loader
+  configuration:
+    dynamic: true  # Enable dynamic execution
+  downstream_blocks:
+  - process_partition
+  
+- uuid: process_partition
+  type: transformer
+  # Runs once per item returned from load_partitions
+```
+</CodeGroup>
+
+### Callbacks and Notifications
+
+<Tabs>
+  <Tab title="Airflow">
+    ```python
+    def on_failure_callback(context):
+        # Send notification
+        pass
+    
+    with DAG(
+        dag_id='my_dag',
+        on_failure_callback=on_failure_callback,
+        default_args={
+            'on_success_callback': on_success,
+            'on_retry_callback': on_retry,
+        }
+    ) as dag:
+        pass
+    ```
+  </Tab>
+  <Tab title="Mage">
+    ```yaml
+    # In pipeline metadata.yaml
+    notification_config:
+      alert_on:
+      - trigger_failure
+      - trigger_success
+      slack:
+        webhook_url: "{{ env_var('SLACK_WEBHOOK_URL') }}"
+      email:
+        smtp_host: smtp.gmail.com
+        smtp_port: 587
+        to_emails:
+        - team@company.com
+    ```
+    
+    Or use callback blocks:
+    ```python
+    # Create a callback block
+    if 'callback' not in globals():
+        from mage_ai.data_preparation.decorators import callback
+    
+    @callback('success')
+    def on_success(*args, **kwargs):
+        # Runs after block succeeds
+        pass
+    ```
+  </Tab>
+</Tabs>
+
+## Testing
+
+<CodeGroup>
+```python Airflow - Tests
+# tests/dags/test_my_dag.py
+from airflow.models import DagBag
+import pytest
+
+def test_dag_loaded():
+    dag_bag = DagBag()
+    assert 'my_dag' in dag_bag.dags
+    
+def test_task_count():
+    dag_bag = DagBag()
+    dag = dag_bag.get_dag('my_dag')
+    assert len(dag.tasks) == 3
+```
+
+```python Mage - Tests
+# In the same file as your block
+@test
+def test_output(output, *args) -> None:
+    """
+    Test that the block output is valid.
+    """
+    assert output is not None, 'Output is undefined'
+    assert len(output) > 0, 'Output is empty'
+    assert 'user_id' in output.columns, 'Missing user_id column'
+```
+</CodeGroup>
+
+<Note>
+Mage supports inline tests that run automatically after each block execution. Tests are defined in the same file as your block logic.
+</Note>
+
+## Migration Checklist
+
+- [ ] **Inventory DAGs**: List all Airflow DAGs and their schedules
+- [ ] **Map Dependencies**: Document task dependencies for each DAG
+- [ ] **Identify Operators**: Note which Airflow operators are used
+- [ ] **Review Variables**: Export Airflow Variables and Connections
+- [ ] **Create Pipelines**: Create equivalent Mage pipelines
+- [ ] **Convert Tasks**: Transform each task into a Mage block
+- [ ] **Configure Triggers**: Set up schedules in Mage
+- [ ] **Test Pipelines**: Run test executions of each pipeline
+- [ ] **Set up Monitoring**: Configure alerts and notifications
+- [ ] **Migrate Variables**: Add runtime variables to triggers
+- [ ] **Update Documentation**: Document pipeline logic and dependencies
+- [ ] **Gradual Cutover**: Run in parallel before full migration
+
+## Common Patterns
+
+### Pattern 1: ETL Pipeline
+
+**Airflow**: Multiple operators with XCom passing
+**Mage**: data_loader → transformer → data_exporter blocks with automatic data flow
+
+### Pattern 2: Multiple Data Sources
+
+**Airflow**: Parallel tasks with task dependencies
+**Mage**: Multiple data_loader blocks feeding into a single transformer
+
+### Pattern 3: Data Quality Checks
+
+**Airflow**: SQLCheckOperator or custom checks
+**Mage**: Test functions within blocks or dedicated conditional blocks
+
+## Additional Resources
+
+- [Mage Blocks Documentation](/pipelines/blocks)
+- [Pipeline Configuration](/pipelines/overview)
+- [Scheduling & Triggers](/orchestration/triggers)
+- [Testing in Mage](/development/testing)
+
+## Getting Help
+
+If you need assistance with your migration:
+
+- Join the [Mage Community Slack](https://www.mage.ai/chat)
+- Check the [GitHub Discussions](https://github.com/mage-ai/mage-ai/discussions)
+- Review [example pipelines](https://github.com/mage-ai/mage-ai/tree/master/mage_ai/data_preparation/templates)

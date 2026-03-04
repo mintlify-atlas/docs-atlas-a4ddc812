@@ -1,0 +1,499 @@
+---
+title: '@transformer'
+description: 'Decorator for data transformation blocks in Mage'
+---
+
+## Overview
+
+The `@transformer` decorator identifies a function as a data transformation block in Mage. Transformers receive data from upstream blocks, apply transformations, and pass the results to downstream blocks.
+
+## Basic Usage
+
+```python
+from mage_ai.data_preparation.decorators import transformer
+
+@transformer
+def transform_data(data, *args, **kwargs):
+    """
+    Transform the input data.
+    """
+    # Your transformation logic
+    return transformed_data
+```
+
+## Function Signature
+
+The decorated function should follow this signature:
+
+```python
+@transformer
+def transform(
+    data,         # Output from first upstream block
+    *args,        # Outputs from additional upstream blocks
+    **kwargs      # Global variables and configuration
+) -> Any:         # Returns transformed data
+    pass
+```
+
+## Parameters
+
+<ParamField path="data" type="Any" required>
+  Output from the first upstream block. Can be a DataFrame, dict, list, or any Python object.
+</ParamField>
+
+<ParamField path="*args" type="tuple">
+  Outputs from additional upstream blocks (if multiple upstream dependencies exist).
+</ParamField>
+
+<ParamField path="**kwargs" type="dict">
+  Contains:
+  - Global variables defined in the pipeline
+  - `execution_date`: Current execution timestamp
+  - `execution_partition`: Partition identifier
+  - Custom variables passed during execution
+</ParamField>
+
+<ResponseField name="return" type="Any">
+  Transformed data to pass to downstream blocks. Can be single or multiple outputs.
+</ResponseField>
+
+## Examples
+
+### Basic Transformation
+
+```python
+import pandas as pd
+from mage_ai.data_preparation.decorators import transformer
+
+@transformer
+def clean_data(df: pd.DataFrame, *args, **kwargs) -> pd.DataFrame:
+    """
+    Clean and prepare customer data.
+    """
+    # Remove duplicates
+    df = df.drop_duplicates(subset=['customer_id'])
+    
+    # Handle missing values
+    df['email'] = df['email'].fillna('unknown@example.com')
+    df['phone'] = df['phone'].fillna('N/A')
+    
+    # Standardize column names
+    df.columns = df.columns.str.lower().str.replace(' ', '_')
+    
+    return df
+```
+
+### Transform with Multiple Inputs
+
+```python
+import pandas as pd
+from mage_ai.data_preparation.decorators import transformer
+
+@transformer
+def join_datasets(
+    customers: pd.DataFrame,
+    orders: pd.DataFrame,
+    *args,
+    **kwargs
+) -> pd.DataFrame:
+    """
+    Join customer and order data.
+    """
+    # Merge customers with orders
+    result = customers.merge(
+        orders,
+        on='customer_id',
+        how='left'
+    )
+    
+    # Add computed columns
+    result['total_orders'] = result.groupby('customer_id')['order_id'].transform('count')
+    result['total_spent'] = result.groupby('customer_id')['order_amount'].transform('sum')
+    
+    return result
+```
+
+### Data Type Conversions
+
+```python
+import pandas as pd
+from mage_ai.data_preparation.decorators import transformer
+
+@transformer
+def convert_types(df: pd.DataFrame, *args, **kwargs) -> pd.DataFrame:
+    """
+    Convert columns to appropriate data types.
+    """
+    # Convert date columns
+    df['created_at'] = pd.to_datetime(df['created_at'])
+    df['updated_at'] = pd.to_datetime(df['updated_at'])
+    
+    # Convert numeric columns
+    df['price'] = pd.to_numeric(df['price'], errors='coerce')
+    df['quantity'] = df['quantity'].astype('int64')
+    
+    # Convert categorical columns
+    df['category'] = df['category'].astype('category')
+    df['status'] = df['status'].astype('category')
+    
+    return df
+```
+
+### Filter and Aggregate
+
+```python
+import pandas as pd
+from mage_ai.data_preparation.decorators import transformer
+
+@transformer
+def aggregate_sales(df: pd.DataFrame, *args, **kwargs) -> pd.DataFrame:
+    """
+    Aggregate sales data by category and date.
+    """
+    # Filter for completed orders
+    df = df[df['status'] == 'completed']
+    
+    # Group by category and date
+    aggregated = df.groupby(['category', 'order_date']).agg({
+        'order_id': 'count',
+        'revenue': 'sum',
+        'quantity': 'sum'
+    }).reset_index()
+    
+    # Rename columns
+    aggregated.columns = ['category', 'date', 'total_orders', 'total_revenue', 'total_quantity']
+    
+    # Calculate average order value
+    aggregated['avg_order_value'] = aggregated['total_revenue'] / aggregated['total_orders']
+    
+    return aggregated
+```
+
+### Add Calculated Columns
+
+```python
+import pandas as pd
+import numpy as np
+from mage_ai.data_preparation.decorators import transformer
+
+@transformer
+def add_features(df: pd.DataFrame, *args, **kwargs) -> pd.DataFrame:
+    """
+    Add calculated feature columns.
+    """
+    # Calculate customer age
+    df['age'] = (pd.Timestamp.now() - df['birth_date']).dt.days // 365
+    
+    # Create age groups
+    df['age_group'] = pd.cut(
+        df['age'],
+        bins=[0, 18, 35, 50, 65, 100],
+        labels=['<18', '18-35', '36-50', '51-65', '65+']
+    )
+    
+    # Customer lifetime value
+    df['customer_lifetime_value'] = df['total_orders'] * df['avg_order_value']
+    
+    # Create binary flags
+    df['is_premium'] = (df['customer_lifetime_value'] > 1000).astype(int)
+    df['is_active'] = (df['last_order_date'] >= pd.Timestamp.now() - pd.Timedelta(days=90)).astype(int)
+    
+    return df
+```
+
+### String Operations
+
+```python
+import pandas as pd
+from mage_ai.data_preparation.decorators import transformer
+
+@transformer
+def clean_text(df: pd.DataFrame, *args, **kwargs) -> pd.DataFrame:
+    """
+    Clean and standardize text columns.
+    """
+    # Standardize email addresses
+    df['email'] = df['email'].str.lower().str.strip()
+    
+    # Clean phone numbers
+    df['phone'] = df['phone'].str.replace(r'[^0-9]', '', regex=True)
+    
+    # Standardize names
+    df['first_name'] = df['first_name'].str.title().str.strip()
+    df['last_name'] = df['last_name'].str.title().str.strip()
+    df['full_name'] = df['first_name'] + ' ' + df['last_name']
+    
+    # Extract domain from email
+    df['email_domain'] = df['email'].str.split('@').str[1]
+    
+    return df
+```
+
+### Handle Outliers
+
+```python
+import pandas as pd
+import numpy as np
+from mage_ai.data_preparation.decorators import transformer
+
+@transformer
+def remove_outliers(df: pd.DataFrame, *args, **kwargs) -> pd.DataFrame:
+    """
+    Identify and handle outliers in numeric columns.
+    """
+    numeric_columns = ['price', 'quantity', 'revenue']
+    
+    for col in numeric_columns:
+        # Calculate IQR
+        Q1 = df[col].quantile(0.25)
+        Q3 = df[col].quantile(0.75)
+        IQR = Q3 - Q1
+        
+        # Define outlier bounds
+        lower_bound = Q1 - 1.5 * IQR
+        upper_bound = Q3 + 1.5 * IQR
+        
+        # Cap outliers
+        df[col] = df[col].clip(lower=lower_bound, upper=upper_bound)
+    
+    return df
+```
+
+### Pivot and Reshape
+
+```python
+import pandas as pd
+from mage_ai.data_preparation.decorators import transformer
+
+@transformer
+def pivot_data(df: pd.DataFrame, *args, **kwargs) -> pd.DataFrame:
+    """
+    Reshape data from long to wide format.
+    """
+    # Pivot sales data by category and month
+    pivoted = df.pivot_table(
+        values='revenue',
+        index='customer_id',
+        columns='category',
+        aggfunc='sum',
+        fill_value=0
+    ).reset_index()
+    
+    # Flatten column names
+    pivoted.columns.name = None
+    
+    return pivoted
+```
+
+### Time Series Features
+
+```python
+import pandas as pd
+from mage_ai.data_preparation.decorators import transformer
+
+@transformer
+def extract_time_features(df: pd.DataFrame, *args, **kwargs) -> pd.DataFrame:
+    """
+    Extract time-based features from datetime columns.
+    """
+    # Extract date components
+    df['year'] = df['order_date'].dt.year
+    df['month'] = df['order_date'].dt.month
+    df['day'] = df['order_date'].dt.day
+    df['day_of_week'] = df['order_date'].dt.dayofweek
+    df['week_of_year'] = df['order_date'].dt.isocalendar().week
+    df['quarter'] = df['order_date'].dt.quarter
+    
+    # Create categorical time features
+    df['is_weekend'] = df['day_of_week'].isin([5, 6]).astype(int)
+    df['is_month_start'] = df['order_date'].dt.is_month_start.astype(int)
+    df['is_month_end'] = df['order_date'].dt.is_month_end.astype(int)
+    
+    # Day name
+    df['day_name'] = df['order_date'].dt.day_name()
+    
+    return df
+```
+
+### Using Global Variables
+
+```python
+import pandas as pd
+from mage_ai.data_preparation.decorators import transformer
+
+@transformer
+def transform_with_config(df: pd.DataFrame, *args, **kwargs) -> pd.DataFrame:
+    """
+    Transform data using global variables.
+    """
+    # Get configuration from kwargs
+    env = kwargs.get('env', 'development')
+    date_threshold = kwargs.get('date_threshold', '2024-01-01')
+    min_revenue = kwargs.get('min_revenue', 100)
+    
+    print(f"Environment: {env}")
+    
+    # Apply environment-specific transformations
+    if env == 'production':
+        # Filter for recent data
+        df = df[df['order_date'] >= date_threshold]
+    
+    # Filter by revenue threshold
+    df = df[df['revenue'] >= min_revenue]
+    
+    return df
+```
+
+### Return Multiple Outputs
+
+```python
+import pandas as pd
+from mage_ai.data_preparation.decorators import transformer
+
+@transformer
+def split_data(df: pd.DataFrame, *args, **kwargs) -> tuple:
+    """
+    Split data into multiple outputs for different downstream blocks.
+    """
+    # Split by customer segment
+    premium_customers = df[df['is_premium'] == 1]
+    regular_customers = df[df['is_premium'] == 0]
+    
+    # Create summary statistics
+    summary_stats = df.groupby('category').agg({
+        'revenue': ['sum', 'mean', 'count']
+    }).reset_index()
+    
+    # Return multiple dataframes
+    return premium_customers, regular_customers, summary_stats
+```
+
+### Data Quality Checks
+
+```python
+import pandas as pd
+from mage_ai.data_preparation.decorators import transformer
+import logging
+
+logger = logging.getLogger(__name__)
+
+@transformer
+def validate_and_transform(df: pd.DataFrame, *args, **kwargs) -> pd.DataFrame:
+    """
+    Validate data quality and transform.
+    """
+    initial_count = len(df)
+    
+    # Check for required columns
+    required_columns = ['customer_id', 'order_date', 'revenue']
+    missing_columns = set(required_columns) - set(df.columns)
+    if missing_columns:
+        raise ValueError(f"Missing required columns: {missing_columns}")
+    
+    # Remove rows with missing critical data
+    df = df.dropna(subset=['customer_id', 'revenue'])
+    
+    # Remove negative revenue
+    df = df[df['revenue'] >= 0]
+    
+    # Log data quality metrics
+    rows_removed = initial_count - len(df)
+    if rows_removed > 0:
+        logger.warning(f"Removed {rows_removed} invalid rows ({rows_removed/initial_count*100:.2f}%)")
+    
+    # Check for duplicates
+    duplicates = df.duplicated(subset=['customer_id', 'order_date']).sum()
+    if duplicates > 0:
+        logger.warning(f"Found {duplicates} duplicate records")
+        df = df.drop_duplicates(subset=['customer_id', 'order_date'])
+    
+    logger.info(f"Final dataset: {len(df)} rows")
+    
+    return df
+```
+
+## Best Practices
+
+### 1. Use Type Hints
+
+```python
+import pandas as pd
+from typing import Tuple
+
+@transformer
+def transform(
+    data: pd.DataFrame,
+    *args,
+    **kwargs
+) -> pd.DataFrame:
+    return data.copy()
+```
+
+### 2. Add Logging
+
+```python
+import logging
+logger = logging.getLogger(__name__)
+
+@transformer
+def transform(data, *args, **kwargs):
+    logger.info(f"Input shape: {data.shape}")
+    # Transform
+    logger.info(f"Output shape: {result.shape}")
+    return result
+```
+
+### 3. Avoid In-Place Modifications
+
+```python
+# Good - creates a copy
+@transformer
+def transform(df, *args, **kwargs):
+    df = df.copy()
+    df['new_column'] = df['old_column'] * 2
+    return df
+
+# Avoid - modifies original
+@transformer
+def transform(df, *args, **kwargs):
+    df['new_column'] = df['old_column'] * 2
+    return df
+```
+
+### 4. Add Docstrings
+
+```python
+@transformer
+def transform(df: pd.DataFrame, *args, **kwargs) -> pd.DataFrame:
+    """
+    Clean and standardize customer data.
+    
+    Args:
+        df: Raw customer data from upstream block
+        
+    Returns:
+        Cleaned customer DataFrame with standardized columns
+    """
+    return df
+```
+
+## Testing Transformers
+
+```python
+from mage_ai.data_preparation.decorators import test
+
+@transformer
+def transform(df, *args, **kwargs):
+    df['total'] = df['price'] * df['quantity']
+    return df
+
+@test
+def test_output(output, *args):
+    """
+    Test that transformation produces expected results.
+    """
+    assert output is not None, 'Output is undefined'
+    assert 'total' in output.columns, 'Missing total column'
+    assert (output['total'] >= 0).all(), 'Found negative totals'
+    assert len(output) > 0, 'Output is empty'
+```

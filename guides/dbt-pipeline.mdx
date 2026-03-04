@@ -1,0 +1,820 @@
+---
+title: "Integrating dbt with Mage"
+description: "Build data transformation pipelines using dbt models in Mage with orchestration and testing"
+icon: "code-branch"
+---
+
+## Overview
+
+Learn how to integrate dbt (data build tool) with Mage to create powerful data transformation workflows. This tutorial covers:
+
+- Setting up dbt in Mage
+- Running dbt models as pipeline blocks
+- Combining dbt with Python transformations
+- Testing and validating dbt models
+- Orchestrating complex dbt workflows
+
+<Tip>
+dbt provides version control, testing, and documentation for your SQL transformations, while Mage handles orchestration and integration with other data tools.
+</Tip>
+
+## Prerequisites
+
+- Mage installed and running
+- Basic knowledge of SQL and dbt
+- A database connection (PostgreSQL, Snowflake, BigQuery, etc.)
+- dbt installed (`pip install dbt-core dbt-postgres`)
+
+---
+
+<Steps>
+
+<Step title="Initialize dbt Project">
+
+First, set up a dbt project in your Mage repository.
+
+### Option 1: Create New dbt Project
+
+In your Mage project directory:
+
+```bash
+# Navigate to your Mage project
+cd /path/to/mage-project
+
+# Initialize dbt project
+dbt init my_dbt_project
+
+# Move into the dbt directory
+cd my_dbt_project
+```
+
+### Option 2: Use Existing dbt Project
+
+Clone your existing dbt repository into your Mage project:
+
+```bash
+# Clone into dbt directory
+git clone https://github.com/your-org/dbt-project.git dbt/
+```
+
+### Configure dbt Profile
+
+Edit `~/.dbt/profiles.yml` or `dbt/profiles.yml`:
+
+```yaml profiles.yml
+my_dbt_project:
+  target: dev
+  outputs:
+    dev:
+      type: postgres
+      host: localhost
+      port: 5432
+      user: "{{ env_var('DB_USER') }}"
+      password: "{{ env_var('DB_PASSWORD') }}"
+      dbname: analytics
+      schema: dbt_dev
+      threads: 4
+    
+    prod:
+      type: postgres
+      host: prod-db.example.com
+      port: 5432
+      user: "{{ env_var('DB_USER') }}"
+      password: "{{ env_var('DB_PASSWORD') }}"
+      dbname: analytics
+      schema: dbt_prod
+      threads: 8
+```
+
+<Note>
+Use environment variables for sensitive credentials instead of hardcoding them in the profiles file.
+</Note>
+
+</Step>
+
+<Step title="Create dbt Models">
+
+Create SQL models in your dbt project.
+
+### Create a Staging Model
+
+```sql models/staging/stg_customers.sql
+{{ config(
+    materialized='view'
+) }}
+
+with source_data as (
+    select
+        customer_id,
+        first_name,
+        last_name,
+        email,
+        created_at,
+        updated_at
+    from {{ source('postgres', 'raw_customers') }}
+),
+
+renamed as (
+    select
+        customer_id,
+        first_name,
+        last_name,
+        lower(email) as email,
+        created_at,
+        updated_at,
+        current_timestamp as dbt_loaded_at
+    from source_data
+)
+
+select * from renamed
+```
+
+### Create a Transformation Model
+
+```sql models/marts/customers.sql
+{{ config(
+    materialized='table',
+    unique_key='customer_id'
+) }}
+
+with customers as (
+    select * from {{ ref('stg_customers') }}
+),
+
+orders as (
+    select * from {{ ref('stg_orders') }}
+),
+
+customer_orders as (
+    select
+        customer_id,
+        count(*) as total_orders,
+        sum(order_amount) as lifetime_value,
+        min(order_date) as first_order_date,
+        max(order_date) as last_order_date
+    from orders
+    group by customer_id
+),
+
+final as (
+    select
+        c.customer_id,
+        c.first_name,
+        c.last_name,
+        c.email,
+        c.created_at,
+        coalesce(co.total_orders, 0) as total_orders,
+        coalesce(co.lifetime_value, 0) as lifetime_value,
+        co.first_order_date,
+        co.last_order_date,
+        case
+            when co.total_orders >= 10 then 'VIP'
+            when co.total_orders >= 5 then 'Loyal'
+            else 'Regular'
+        end as customer_segment
+    from customers c
+    left join customer_orders co on c.customer_id = co.customer_id
+)
+
+select * from final
+```
+
+### Define Sources
+
+```yaml models/staging/sources.yml
+version: 2
+
+sources:
+  - name: postgres
+    database: raw_data
+    schema: public
+    tables:
+      - name: raw_customers
+        description: "Raw customer data from application database"
+        columns:
+          - name: customer_id
+            description: "Primary key"
+            tests:
+              - unique
+              - not_null
+          - name: email
+            tests:
+              - not_null
+      
+      - name: raw_orders
+        description: "Raw order data"
+        columns:
+          - name: order_id
+            tests:
+              - unique
+              - not_null
+```
+
+</Step>
+
+<Step title="Create a Mage Pipeline with dbt">
+
+Now create a Mage pipeline that runs your dbt models.
+
+1. Create a new **Standard (batch)** pipeline
+2. Name it `dbt_transformation_pipeline`
+
+</Step>
+
+<Step title="Add dbt Blocks">
+
+Add dbt blocks to run your models.
+
+### Run dbt Models Block
+
+1. Click **+ dbt model**
+2. Configure the block
+3. Name it `run_dbt_models`
+
+Mage will create a dbt block. Configure it:
+
+```yaml dbt_block_config.yaml
+block_type: dbt
+project_name: my_dbt_project
+profile_target: dev
+
+# Run specific models
+models:
+  - stg_customers
+  - stg_orders  
+  - customers
+
+# Or run all models
+# run_all: true
+
+# Additional dbt flags
+flags:
+  - --full-refresh
+```
+
+Alternatively, use a custom Python block:
+
+```python
+import os
+import subprocess
+from pathlib import Path
+
+if 'dbt' not in globals():
+    from mage_ai.data_preparation.decorators import custom
+
+@custom
+def run_dbt_models(*args, **kwargs):
+    """
+    Run dbt models
+    """
+    dbt_project_dir = Path('/path/to/mage-project/dbt')
+    
+    # Change to dbt directory
+    os.chdir(dbt_project_dir)
+    
+    # Run dbt models
+    models = kwargs.get('models', [])
+    target = kwargs.get('target', 'dev')
+    
+    if models:
+        # Run specific models
+        for model in models:
+            cmd = f"dbt run --select {model} --target {target}"
+            result = subprocess.run(
+                cmd,
+                shell=True,
+                capture_output=True,
+                text=True
+            )
+            
+            if result.returncode != 0:
+                print(f"Error running model {model}:")
+                print(result.stderr)
+                raise Exception(f"dbt run failed for {model}")
+            
+            print(result.stdout)
+    else:
+        # Run all models
+        cmd = f"dbt run --target {target}"
+        result = subprocess.run(
+            cmd,
+            shell=True,
+            capture_output=True,
+            text=True
+        )
+        
+        if result.returncode != 0:
+            print("Error running dbt:")
+            print(result.stderr)
+            raise Exception("dbt run failed")
+        
+        print(result.stdout)
+    
+    return {'status': 'success', 'target': target}
+```
+
+### Run dbt Tests
+
+Add a block to run dbt tests:
+
+```python
+import os
+import subprocess
+from pathlib import Path
+
+if 'dbt' not in globals():
+    from mage_ai.data_preparation.decorators import custom
+
+@custom  
+def test_dbt_models(*args, **kwargs):
+    """
+    Run dbt tests
+    """
+    dbt_project_dir = Path('/path/to/mage-project/dbt')
+    os.chdir(dbt_project_dir)
+    
+    target = kwargs.get('target', 'dev')
+    
+    # Run dbt tests
+    cmd = f"dbt test --target {target}"
+    result = subprocess.run(
+        cmd,
+        shell=True,
+        capture_output=True,
+        text=True
+    )
+    
+    print(result.stdout)
+    
+    if result.returncode != 0:
+        print("Some tests failed:")
+        print(result.stderr)
+        raise Exception("dbt tests failed")
+    
+    return {'status': 'all_tests_passed'}
+```
+
+</Step>
+
+<Step title="Combine dbt with Python">
+
+Combine dbt transformations with Python for advanced workflows.
+
+### Python Pre-processing Before dbt
+
+```python
+import pandas as pd
+from mage_ai.settings.repo import get_repo_path
+from mage_ai.io.config import ConfigFileLoader
+from mage_ai.io.postgres import Postgres
+from os import path
+
+if 'data_loader' not in globals():
+    from mage_ai.data_preparation.decorators import data_loader
+
+@data_loader
+def load_and_prepare_data(*args, **kwargs):
+    """
+    Load and prepare data before dbt
+    """
+    # Load raw data
+    query = "SELECT * FROM external_api_data WHERE status = 'new'"
+    
+    config_path = path.join(get_repo_path(), 'io_config.yaml')
+    with Postgres.with_config(ConfigFileLoader(config_path, 'default')) as loader:
+        df = loader.load(query)
+    
+    # Python transformations that are hard in SQL
+    import json
+    df['parsed_metadata'] = df['metadata_json'].apply(json.loads)
+    df['enriched_field'] = df.apply(complex_enrichment_function, axis=1)
+    
+    # Write to staging table for dbt
+    with Postgres.with_config(ConfigFileLoader(config_path, 'default')) as loader:
+        loader.export(
+            df,
+            'staging',
+            'raw_customers',
+            if_exists='replace'
+        )
+    
+    print(f"Prepared {len(df)} rows for dbt")
+    return df
+```
+
+### Python Post-processing After dbt
+
+```python
+import pandas as pd
+import requests
+
+if 'transformer' not in globals():
+    from mage_ai.data_preparation.decorators import transformer
+
+@transformer
+def enrich_after_dbt(data, *args, **kwargs):
+    """
+    Enrich dbt output with Python
+    """
+    # Load dbt model output
+    query = "SELECT * FROM analytics.customers"
+    
+    config_path = path.join(get_repo_path(), 'io_config.yaml')
+    with Postgres.with_config(ConfigFileLoader(config_path, 'default')) as loader:
+        df = loader.load(query)
+    
+    # Add ML predictions
+    df['churn_probability'] = df.apply(predict_churn, axis=1)
+    
+    # Add external data
+    df['credit_score'] = df['customer_id'].apply(
+        lambda x: get_credit_score(x)
+    )
+    
+    # Export enriched data
+    with Postgres.with_config(ConfigFileLoader(config_path, 'default')) as loader:
+        loader.export(
+            df,
+            'analytics',
+            'customers_enriched',
+            if_exists='replace'
+        )
+    
+    return df
+```
+
+</Step>
+
+<Step title="Implement dbt Snapshots">
+
+Use dbt snapshots for slowly changing dimensions.
+
+```sql snapshots/customers_snapshot.sql
+{% snapshot customers_snapshot %}
+
+{{
+    config(
+        target_schema='snapshots',
+        unique_key='customer_id',
+        strategy='timestamp',
+        updated_at='updated_at'
+    )
+}}
+
+select * from {{ source('postgres', 'raw_customers') }}
+
+{% endsnapshot %}
+```
+
+Run snapshots in Mage:
+
+```python
+@custom
+def run_dbt_snapshot(*args, **kwargs):
+    """
+    Run dbt snapshot
+    """
+    dbt_project_dir = Path('/path/to/mage-project/dbt')
+    os.chdir(dbt_project_dir)
+    
+    cmd = "dbt snapshot --target dev"
+    result = subprocess.run(
+        cmd,
+        shell=True,
+        capture_output=True,
+        text=True
+    )
+    
+    if result.returncode != 0:
+        raise Exception(f"dbt snapshot failed: {result.stderr}")
+    
+    print(result.stdout)
+    return {'status': 'success'}
+```
+
+</Step>
+
+<Step title="Add dbt Documentation">
+
+Generate and serve dbt documentation.
+
+```python
+import os
+import subprocess
+from pathlib import Path
+
+if 'custom' not in globals():
+    from mage_ai.data_preparation.decorators import custom
+
+@custom
+def generate_dbt_docs(*args, **kwargs):
+    """
+    Generate dbt documentation
+    """
+    dbt_project_dir = Path('/path/to/mage-project/dbt')
+    os.chdir(dbt_project_dir)
+    
+    # Generate documentation
+    cmd = "dbt docs generate --target dev"
+    result = subprocess.run(
+        cmd,
+        shell=True,
+        capture_output=True,
+        text=True
+    )
+    
+    if result.returncode != 0:
+        raise Exception(f"dbt docs generate failed: {result.stderr}")
+    
+    print("Documentation generated successfully")
+    print(result.stdout)
+    
+    # Optionally serve docs
+    # subprocess.Popen(["dbt", "docs", "serve", "--port", "8001"])
+    
+    return {'status': 'docs_generated'}
+```
+
+Add model documentation:
+
+```yaml models/marts/schema.yml
+version: 2
+
+models:
+  - name: customers
+    description: "Customer dimension table with lifetime metrics"
+    columns:
+      - name: customer_id
+        description: "Primary key for customers"
+        tests:
+          - unique
+          - not_null
+      
+      - name: customer_segment
+        description: "Customer segmentation: VIP, Loyal, or Regular"
+        tests:
+          - accepted_values:
+              values: ['VIP', 'Loyal', 'Regular']
+      
+      - name: lifetime_value
+        description: "Total revenue from customer"
+        tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: ">= 0"
+```
+
+</Step>
+
+</Steps>
+
+---
+
+## Complete Pipeline Example
+
+Here's a complete dbt + Python pipeline:
+
+```python
+# Block 1: Data Loader
+@data_loader
+def load_raw_data(*args, **kwargs):
+    """Load raw data into staging tables"""
+    # Load from API/CSV/etc and write to database
+    pass
+
+# Block 2: Run dbt staging models  
+@custom
+def run_dbt_staging(*args, **kwargs):
+    """Run dbt staging models"""
+    subprocess.run("dbt run --select staging.*", shell=True)
+
+# Block 3: Run dbt marts models
+@custom  
+def run_dbt_marts(*args, **kwargs):
+    """Run dbt marts models"""
+    subprocess.run("dbt run --select marts.*", shell=True)
+
+# Block 4: Run dbt tests
+@custom
+def run_dbt_tests(*args, **kwargs):
+    """Run all dbt tests"""
+    subprocess.run("dbt test", shell=True)
+
+# Block 5: Python post-processing
+@transformer
+def add_ml_features(*args, **kwargs):
+    """Add ML features to dbt output"""
+    # Load dbt output and enrich
+    pass
+
+# Block 6: Export final results
+@data_exporter
+def export_final_data(data, *args, **kwargs):
+    """Export to production tables"""
+    pass
+```
+
+---
+
+## Advanced dbt Patterns
+
+### Incremental Models
+
+```sql models/marts/orders_incremental.sql
+{{ config(
+    materialized='incremental',
+    unique_key='order_id',
+    on_schema_change='fail'
+) }}
+
+select
+    order_id,
+    customer_id,
+    order_date,
+    order_amount,
+    updated_at
+from {{ source('postgres', 'raw_orders') }}
+
+{% if is_incremental() %}
+    where updated_at > (select max(updated_at) from {{ this }})
+{% endif %}
+```
+
+### Macros for Reusability
+
+```sql macros/cents_to_dollars.sql
+{% macro cents_to_dollars(column_name) %}
+    ({{ column_name }} / 100.0)::numeric(10,2)
+{% endmacro %}
+```
+
+Use in models:
+
+```sql
+select
+    order_id,
+    {{ cents_to_dollars('order_amount_cents') }} as order_amount_dollars
+from orders
+```
+
+### Custom Tests
+
+```sql tests/assert_positive_order_amounts.sql
+select
+    order_id,
+    order_amount
+from {{ ref('orders') }}
+where order_amount < 0
+```
+
+---
+
+## Orchestration Patterns
+
+### Run dbt on Schedule
+
+```yaml
+# In Mage trigger configuration
+schedule_type: time
+schedule_interval: "0 2 * * *"  # Daily at 2 AM
+status: active
+```
+
+### Conditional dbt Runs
+
+```python
+@custom
+def conditional_dbt_run(*args, **kwargs):
+    """
+    Run dbt only if source data changed
+    """
+    # Check if source data was updated
+    query = "SELECT MAX(updated_at) FROM raw_customers"
+    last_update = execute_query(query)
+    
+    last_dbt_run = kwargs.get('last_dbt_run')
+    
+    if last_update > last_dbt_run:
+        print("Source data changed, running dbt")
+        subprocess.run("dbt run", shell=True)
+    else:
+        print("No changes detected, skipping dbt run")
+```
+
+### Parallel Model Execution
+
+```yaml dbt_project.yml
+models:
+  my_dbt_project:
+    staging:
+      +materialized: view
+      +threads: 8  # Run 8 models in parallel
+    marts:
+      +materialized: table
+      +threads: 4
+```
+
+---
+
+## Testing Strategy
+
+<AccordionGroup>
+  <Accordion title="Schema Tests" icon="table">
+    ```yaml
+    columns:
+      - name: customer_id
+        tests:
+          - unique
+          - not_null
+      - name: email  
+        tests:
+          - unique
+          - not_null
+    ```
+  </Accordion>
+  
+  <Accordion title="Data Tests" icon="check">
+    ```yaml
+    tests:
+      - dbt_utils.expression_is_true:
+          expression: "total_orders >= 0"
+      - dbt_utils.at_least_one:
+          column_name: customer_id
+    ```
+  </Accordion>
+  
+  <Accordion title="Custom SQL Tests" icon="code">
+    ```sql tests/valid_customer_segments.sql
+    select count(*)
+    from {{ ref('customers') }}
+    where customer_segment not in ('VIP', 'Loyal', 'Regular')
+    having count(*) > 0
+    ```
+  </Accordion>
+</AccordionGroup>
+
+---
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="dbt command not found" icon="terminal">
+    Install dbt in your Mage environment:
+    ```bash
+    pip install dbt-core dbt-postgres
+    ```
+    
+    Or add to `requirements.txt`:
+    ```
+    dbt-core==1.5.0
+    dbt-postgres==1.5.0
+    ```
+  </Accordion>
+  
+  <Accordion title="Profile not found" icon="user">
+    Ensure `profiles.yml` is in the correct location:
+    - `~/.dbt/profiles.yml` (user level)
+    - Or `dbt/profiles.yml` (project level)
+    
+    Set `DBT_PROFILES_DIR` environment variable if needed:
+    ```bash
+    export DBT_PROFILES_DIR=/path/to/profiles/dir
+    ```
+  </Accordion>
+  
+  <Accordion title="Models not found" icon="magnifying-glass">
+    Verify dbt project structure:
+    ```
+    dbt/
+    ├── dbt_project.yml
+    ├── profiles.yml
+    └── models/
+        ├── staging/
+        └── marts/
+    ```
+    
+    Check `dbt_project.yml` model paths:
+    ```yaml
+    model-paths: ["models"]
+    ```
+  </Accordion>
+</AccordionGroup>
+
+---
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="ML Pipeline" icon="brain" href="/guides/ml-pipeline">
+    Combine dbt with ML workflows
+  </Card>
+  <Card title="Data Quality" icon="shield-check" href="/development/testing">
+    Implement comprehensive data quality checks
+  </Card>
+  <Card title="Testing" icon="vial" href="/development/testing">
+    Write tests for your pipelines
+  </Card>
+  <Card title="Deployment" icon="rocket" href="/deployment/cloud-providers">
+    Deploy dbt pipelines to production
+  </Card>
+</CardGroup>

@@ -1,0 +1,785 @@
+---
+title: Migrating from Prefect to Mage
+description: Complete guide to migrating your Prefect workflows to Mage pipelines
+---
+
+## Overview
+
+This guide helps you migrate from Prefect to Mage. Both tools emphasize modern Python workflows, but Mage provides a visual, notebook-style interface that simplifies pipeline development and debugging.
+
+## Key Concept Mapping
+
+### Core Components
+
+| Prefect | Mage | Notes |
+|---------|------|-------|
+| Task | Block | Self-contained units of work |
+| Flow | Pipeline | Workflow definition |
+| Deployment | Trigger | Scheduled execution configuration |
+| Task Runner | Executor Type | Determines execution environment |
+| Block (Prefect) | IO Config | Configuration and secrets management |
+| Result | Block Output | Automatic data persistence |
+| Artifact | Variable | Named outputs stored for reference |
+| Work Pool | Executor Config | Resource allocation and scaling |
+
+### Execution & State
+
+| Prefect | Mage | Notes |
+|---------|------|-------|
+| Flow Run | Pipeline Run | Single execution instance |
+| Task Run | Block Run | Individual block execution |
+| State | Status | Execution state tracking |
+| Subflow | Nested Pipeline | Pipeline within a pipeline |
+| Parameter | Variable | Runtime configuration values |
+
+## Migration Steps
+
+### 1. Converting Flows and Tasks
+
+<CodeGroup>
+```python Prefect - Flow & Tasks
+from prefect import flow, task
+import pandas as pd
+
+@task(retries=3, retry_delay_seconds=60)
+def extract_users() -> pd.DataFrame:
+    """
+    Extract users from database.
+    """
+    return pd.read_sql(
+        "SELECT * FROM users",
+        con="postgresql://localhost/db"
+    )
+
+@task
+def transform_users(users: pd.DataFrame) -> pd.DataFrame:
+    """
+    Clean and transform user data.
+    """
+    users['full_name'] = users['first_name'] + ' ' + users['last_name']
+    return users[users['is_active'] == True]
+
+@task
+def load_to_warehouse(users: pd.DataFrame) -> None:
+    """
+    Load processed users to warehouse.
+    """
+    users.to_sql('users_processed', con=get_warehouse_conn())
+
+@flow(name="user_etl")
+def user_etl_flow():
+    """
+    ETL pipeline for user data.
+    """
+    users = extract_users()
+    transformed = transform_users(users)
+    load_to_warehouse(transformed)
+
+if __name__ == "__main__":
+    user_etl_flow()
+```
+
+```python Mage Block: extract_users.py
+from mage_ai.io.postgres import Postgres
+from pandas import DataFrame
+
+if 'data_loader' not in globals():
+    from mage_ai.data_preparation.decorators import data_loader
+if 'test' not in globals():
+    from mage_ai.data_preparation.decorators import test
+
+@data_loader
+def load_data(*args, **kwargs) -> DataFrame:
+    """
+    Extract users from database.
+    """
+    query = 'SELECT * FROM users'
+    
+    return Postgres.with_config({
+        'host': 'localhost',
+        'database': 'db',
+        'port': 5432,
+    }).load(query)
+
+
+@test
+def test_output(output, *args) -> None:
+    """
+    Test data extraction.
+    """
+    assert output is not None, 'Failed to load data'
+    assert len(output) > 0, 'No users extracted'
+```
+
+```python Mage Block: transform_users.py
+from pandas import DataFrame
+
+if 'transformer' not in globals():
+    from mage_ai.data_preparation.decorators import transformer
+if 'test' not in globals():
+    from mage_ai.data_preparation.decorators import test
+
+@transformer
+def transform(data: DataFrame, *args, **kwargs) -> DataFrame:
+    """
+    Clean and transform user data.
+    Args:
+        data: Automatically passed from upstream extract_users block
+    """
+    data['full_name'] = data['first_name'] + ' ' + data['last_name']
+    return data[data['is_active'] == True]
+
+
+@test
+def test_output(output, *args) -> None:
+    """
+    Validate transformed data.
+    """
+    assert 'full_name' in output.columns, 'Missing full_name column'
+    assert output['is_active'].all(), 'Found inactive users'
+```
+
+```python Mage Block: load_to_warehouse.py
+from mage_ai.io.snowflake import Snowflake
+from pandas import DataFrame
+
+if 'data_exporter' not in globals():
+    from mage_ai.data_preparation.decorators import data_exporter
+
+@data_exporter
+def export_data(data: DataFrame, **kwargs) -> None:
+    """
+    Load processed users to warehouse.
+    """
+    Snowflake.with_config({
+        'account': 'my_account',
+        'warehouse': 'COMPUTE_WH',
+        'database': 'ANALYTICS',
+    }).export(
+        data,
+        table_name='users_processed',
+        if_exists='replace',
+    )
+```
+
+```yaml Mage Pipeline: metadata.yaml
+blocks:
+- uuid: extract_users
+  type: data_loader
+  upstream_blocks: []
+  downstream_blocks:
+  - transform_users
+  retry_config:
+    retries: 3
+    delay: 60
+  
+- uuid: transform_users
+  type: transformer
+  upstream_blocks:
+  - extract_users
+  downstream_blocks:
+  - load_to_warehouse
+  
+- uuid: load_to_warehouse
+  type: data_exporter
+  upstream_blocks:
+  - transform_users
+  downstream_blocks: []
+
+name: user_etl
+type: python
+```
+</CodeGroup>
+
+### 2. Parameters and Configuration
+
+<CodeGroup>
+```python Prefect - Parameters & Blocks
+from prefect import flow, task
+from prefect.blocks.system import Secret
+from prefect_aws import S3Bucket
+
+@flow
+def etl_flow(
+    environment: str = "production",
+    date: str = None,
+):
+    """
+    ETL flow with parameters.
+    """
+    # Access Prefect Blocks
+    api_key = Secret.load("api-key").get()
+    s3_bucket = S3Bucket.load("data-bucket")
+    
+    # Use parameters
+    data = extract_data(environment=environment, date=date)
+    process_data(data)
+```
+
+```python Mage - Variables & Configuration
+# Variables passed via kwargs
+from mage_ai.io.s3 import S3
+import os
+from pandas import DataFrame
+
+if 'data_loader' not in globals():
+    from mage_ai.data_preparation.decorators import data_loader
+
+@data_loader
+def load_data(*args, **kwargs) -> DataFrame:
+    """
+    Extract data with runtime variables.
+    """
+    # Access runtime variables (set in trigger or UI)
+    environment = kwargs.get('environment', 'production')
+    date = kwargs.get('date', kwargs.get('execution_date'))
+    
+    # Access environment variables
+    api_key = os.getenv('API_KEY')
+    
+    # Use S3 with configuration
+    s3 = S3(
+        aws_access_key_id=os.getenv('AWS_ACCESS_KEY_ID'),
+        aws_secret_access_key=os.getenv('AWS_SECRET_ACCESS_KEY'),
+    )
+    
+    # Load data based on parameters
+    file_path = f'data/{environment}/{date}/input.csv'
+    return s3.load(file_path)
+```
+
+```yaml Trigger Configuration
+# Set variables when creating a trigger
+variables:
+  environment: production
+  api_key: "{{ env_var('API_KEY') }}"
+  date: "{{ execution_date }}"
+```
+
+```python Create Trigger with Variables
+from mage_ai.orchestration.db.models.schedules import PipelineSchedule
+
+PipelineSchedule.create(
+    name='daily_etl',
+    pipeline_uuid='user_etl',
+    schedule_type='time',
+    schedule_interval='0 2 * * *',
+    status='active',
+    variables={
+        'environment': 'production',
+        'date': '{{ execution_date }}',
+    },
+)
+```
+</CodeGroup>
+
+### 3. Deployments and Scheduling
+
+<Tabs>
+  <Tab title="Prefect">
+    ```python
+    from prefect import flow
+    from prefect.deployments import Deployment
+    from prefect.server.schemas.schedules import CronSchedule
+    
+    @flow
+    def my_flow():
+        pass
+    
+    deployment = Deployment.build_from_flow(
+        flow=my_flow,
+        name="production-deployment",
+        work_pool_name="kubernetes-pool",
+        schedule=CronSchedule(cron="0 2 * * *", timezone="UTC"),
+        parameters={"env": "production"},
+    )
+    
+    deployment.apply()
+    ```
+    
+    Or via CLI:
+    ```bash
+    prefect deployment build my_flow.py:my_flow \
+      --name production \
+      --cron "0 2 * * *" \
+      --apply
+    ```
+  </Tab>
+  <Tab title="Mage UI">
+    1. Open your pipeline in Mage UI
+    2. Click "Triggers" in sidebar
+    3. Click "+ New trigger"
+    4. Configure:
+       - Name: `production-deployment`
+       - Type: `Schedule`
+       - Schedule: `0 2 * * *`
+       - Status: `Active`
+       - Variables: `{"env": "production"}`
+    5. Select executor type (Local, K8s, ECS, etc.)
+  </Tab>
+  <Tab title="Mage Python API">
+    ```python
+    from mage_ai.orchestration.db.models.schedules import PipelineSchedule
+    
+    schedule = PipelineSchedule.create(
+        name='production-deployment',
+        pipeline_uuid='my_pipeline',
+        schedule_type='time',
+        schedule_interval='0 2 * * *',
+        status='active',
+        variables={'env': 'production'},
+        settings={
+            'executor_type': 'k8s',  # or 'ecs', 'local_python', etc.
+        },
+    )
+    ```
+  </Tab>
+</Tabs>
+
+### 4. Subflows and Nested Pipelines
+
+<CodeGroup>
+```python Prefect - Subflows
+from prefect import flow, task
+
+@task
+def load_data():
+    return [1, 2, 3]
+
+@flow
+def transform_data(data):
+    # Subflow that can be called from other flows
+    return [x * 2 for x in data]
+
+@flow
+def main_flow():
+    """
+    Main flow that calls subflow.
+    """
+    data = load_data()
+    result = transform_data(data)  # Calls subflow
+    return result
+```
+
+```python Mage - Pipeline Blocks
+# You can execute other pipelines from within a block
+from mage_ai.data_preparation.models.pipeline import Pipeline
+from pandas import DataFrame
+
+if 'data_loader' not in globals():
+    from mage_ai.data_preparation.decorators import data_loader
+
+@data_loader
+def load_data(*args, **kwargs) -> DataFrame:
+    """
+    Execute another pipeline and return its results.
+    """
+    # Load and execute another pipeline
+    sub_pipeline = Pipeline.get('transform_data_pipeline')
+    
+    # Execute the pipeline synchronously
+    sub_pipeline.execute_sync(
+        global_vars={
+            'input_data': [1, 2, 3],
+        },
+    )
+    
+    # Get the output from the sub-pipeline
+    from mage_ai.data_preparation.models.variable import Variable
+    
+    result = Variable(
+        'transform_data_pipeline',
+        'output_block',  # UUID of output block
+        'output_0',
+    ).read_data()
+    
+    return result
+```
+
+```yaml Or use Pipeline Block Type
+blocks:
+- uuid: execute_transform_pipeline
+  type: pipeline
+  configuration:
+    pipeline_uuid: transform_data_pipeline
+  upstream_blocks:
+  - load_data
+  downstream_blocks:
+  - final_export
+```
+</CodeGroup>
+
+### 5. Task Runners and Execution
+
+<CodeGroup>
+```python Prefect - Task Runners
+from prefect import flow, task
+from prefect_dask import DaskTaskRunner
+
+@task
+def process_item(item):
+    return item * 2
+
+@flow(task_runner=DaskTaskRunner())
+def parallel_flow():
+    """
+    Flow with concurrent task execution.
+    """
+    items = [1, 2, 3, 4, 5]
+    
+    # Submit tasks for concurrent execution
+    futures = [process_item.submit(item) for item in items]
+    
+    # Wait for results
+    results = [future.result() for future in futures]
+    return results
+```
+
+```python Mage - Parallel Blocks
+# Blocks without dependencies run in parallel automatically
+from pandas import DataFrame
+
+if 'data_loader' not in globals():
+    from mage_ai.data_preparation.decorators import data_loader
+
+@data_loader
+def process_partition_1(*args, **kwargs) -> DataFrame:
+    # Runs in parallel with other blocks
+    return process_data(partition=1)
+```
+
+```yaml Parallel Execution Configuration
+# Blocks at same level run in parallel
+blocks:
+- uuid: process_partition_1
+  type: data_loader
+  upstream_blocks: []  # No dependencies
+  downstream_blocks:
+  - combine_results
+  
+- uuid: process_partition_2
+  type: data_loader
+  upstream_blocks: []  # Runs in parallel with partition_1
+  downstream_blocks:
+  - combine_results
+  
+- uuid: process_partition_3
+  type: data_loader
+  upstream_blocks: []  # Runs in parallel with partition_1 & 2
+  downstream_blocks:
+  - combine_results
+  
+- uuid: combine_results
+  type: transformer
+  upstream_blocks:
+  - process_partition_1
+  - process_partition_2
+  - process_partition_3
+  # Waits for all upstream blocks to complete
+
+# Configure concurrency limits
+concurrency_config:
+  block_run_limit: 3  # Max 3 blocks running simultaneously
+```
+</CodeGroup>
+
+### 6. State Management and Caching
+
+<CodeGroup>
+```python Prefect - Results and Caching
+from prefect import flow, task
+from prefect.tasks import task_input_hash
+from datetime import timedelta
+
+@task(
+    cache_key_fn=task_input_hash,
+    cache_expiration=timedelta(hours=1)
+)
+def expensive_computation(x: int) -> int:
+    """
+    Cached task - won't rerun if inputs are same.
+    """
+    return x ** 2
+
+@task(persist_result=True)
+def save_result(data):
+    """
+    Task result is persisted to storage.
+    """
+    return data
+```
+
+```python Mage - Automatic Output Caching
+# Mage automatically caches block outputs
+from pandas import DataFrame
+
+if 'transformer' not in globals():
+    from mage_ai.data_preparation.decorators import transformer
+
+@transformer
+def transform(data: DataFrame, *args, **kwargs) -> DataFrame:
+    """
+    Output is automatically cached to disk.
+    Subsequent runs can skip this block if unchanged.
+    """
+    # Expensive computation
+    result = perform_expensive_operation(data)
+    return result
+
+# Block outputs are stored in:
+# .mage_data/{pipeline_uuid}/.variables/{block_uuid}/output_0.parquet
+```
+
+```yaml Cache Configuration
+# In pipeline metadata.yaml
+cache_block_output_in_memory: true  # Keep outputs in memory
+
+blocks:
+- uuid: expensive_computation
+  type: transformer
+  configuration:
+    # Block can be manually executed or automatically
+    # skipped based on upstream changes
+    dynamic: false
+```
+</CodeGroup>
+
+### 7. Notifications and Observability
+
+<Tabs>
+  <Tab title="Prefect">
+    ```python
+    from prefect import flow
+    from prefect.blocks.notifications import SlackWebhook
+    
+    @flow(
+        on_failure=[send_slack_notification],
+        on_completion=[log_completion]
+    )
+    def monitored_flow():
+        pass
+    
+    def send_slack_notification(flow, flow_run, state):
+        slack_webhook = SlackWebhook.load("data-team")
+        slack_webhook.notify(
+            f"Flow {flow.name} failed: {state.message}"
+        )
+    ```
+  </Tab>
+  <Tab title="Mage">
+    ```yaml
+    # In pipeline metadata.yaml
+    notification_config:
+      alert_on:
+      - trigger_failure
+      - trigger_success
+      - trigger_passed_sla
+      
+      slack:
+        webhook_url: "{{ env_var('SLACK_WEBHOOK_URL') }}"
+        
+      email:
+        smtp_host: smtp.gmail.com
+        smtp_port: 587
+        smtp_user: "{{ env_var('SMTP_USER') }}"
+        smtp_password: "{{ env_var('SMTP_PASSWORD') }}"
+        to_emails:
+        - data-team@company.com
+    ```
+    
+    Or use callback blocks:
+    ```python
+    # Create callback block for custom logic
+    if 'callback' not in globals():
+        from mage_ai.data_preparation.decorators import callback
+    
+    @callback('failure')
+    def on_failure(*args, **kwargs):
+        """
+        Runs when upstream block fails.
+        """
+        import requests
+        webhook_url = os.getenv('SLACK_WEBHOOK_URL')
+        
+        requests.post(webhook_url, json={
+            'text': f"Pipeline {kwargs['pipeline_uuid']} failed"
+        })
+    ```
+  </Tab>
+</Tabs>
+
+## Advanced Features
+
+### Mapping (Dynamic Task Generation)
+
+<CodeGroup>
+```python Prefect - Task Mapping
+from prefect import flow, task
+
+@task
+def process_item(item: dict) -> dict:
+    # Process individual item
+    return {**item, 'processed': True}
+
+@flow
+def mapped_flow():
+    items = [
+        {'id': 1, 'value': 'a'},
+        {'id': 2, 'value': 'b'},
+        {'id': 3, 'value': 'c'},
+    ]
+    
+    # Map task over items
+    results = process_item.map(items)
+    return results
+```
+
+```python Mage - Dynamic Blocks
+# Block 1: Generate dynamic items
+if 'data_loader' not in globals():
+    from mage_ai.data_preparation.decorators import data_loader
+
+@data_loader
+def generate_items(*args, **kwargs) -> list:
+    """
+    Generate list of items to process.
+    Each item becomes input for downstream blocks.
+    """
+    return [
+        {'id': 1, 'value': 'a'},
+        {'id': 2, 'value': 'b'},
+        {'id': 3, 'value': 'c'},
+    ]
+
+# Block 2: Process each item
+@transformer
+def process_item(data: dict, *args, **kwargs) -> dict:
+    """
+    Runs once per item from generate_items.
+    """
+    return {**data, 'processed': True}
+```
+
+```yaml Dynamic Configuration
+blocks:
+- uuid: generate_items
+  type: data_loader
+  configuration:
+    dynamic: true  # Enable dynamic execution
+  downstream_blocks:
+  - process_item
+  
+- uuid: process_item
+  type: transformer
+  # Automatically runs once per item
+  upstream_blocks:
+  - generate_items
+```
+</CodeGroup>
+
+### Testing
+
+<CodeGroup>
+```python Prefect - Testing
+from prefect import flow, task
+import pytest
+
+@task
+def add_numbers(a: int, b: int) -> int:
+    return a + b
+
+def test_add_numbers():
+    result = add_numbers.fn(2, 3)  # Call task function directly
+    assert result == 5
+
+def test_flow():
+    @flow
+    def test_flow():
+        return add_numbers(2, 3)
+    
+    state = test_flow(return_state=True)
+    assert state.is_completed()
+```
+
+```python Mage - Inline Tests
+# Tests live in the same file as block code
+from pandas import DataFrame
+
+if 'transformer' not in globals():
+    from mage_ai.data_preparation.decorators import transformer
+if 'test' not in globals():
+    from mage_ai.data_preparation.decorators import test
+
+@transformer
+def transform(data: DataFrame, *args, **kwargs) -> DataFrame:
+    """
+    Add computed column.
+    """
+    data['sum'] = data['a'] + data['b']
+    return data
+
+
+@test
+def test_output(output, *args) -> None:
+    """
+    Test runs automatically after transform.
+    """
+    assert 'sum' in output.columns
+    assert (output['sum'] == output['a'] + output['b']).all()
+
+
+@test
+def test_no_nulls(output, *args) -> None:
+    """
+    Check for null values.
+    """
+    assert not output['sum'].isnull().any()
+```
+</CodeGroup>
+
+## Migration Checklist
+
+- [ ] **Inventory Flows**: List all Prefect flows and their tasks
+- [ ] **Map Task Dependencies**: Document task dependencies in each flow
+- [ ] **Review Deployments**: Note all deployment configurations
+- [ ] **Extract Parameters**: Export flow parameters and blocks
+- [ ] **Create Pipelines**: Build equivalent Mage pipelines
+- [ ] **Convert Tasks**: Transform each task into a Mage block
+- [ ] **Set Up Triggers**: Configure schedules for automated runs
+- [ ] **Migrate Configurations**: Set up io_config.yaml for connections
+- [ ] **Convert Tests**: Add test functions to blocks
+- [ ] **Configure Notifications**: Set up alerts for failures/success
+- [ ] **Test Execution**: Run full pipeline tests
+- [ ] **Update Documentation**: Document pipeline logic
+- [ ] **Monitor Parallel Runs**: Verify concurrency configurations
+
+## Common Patterns
+
+### Pattern 1: Simple ETL
+
+**Prefect**: Flow with extract, transform, load tasks
+**Mage**: data_loader → transformer → data_exporter blocks
+
+### Pattern 2: Fan-out/Fan-in
+
+**Prefect**: Task.map() with gather
+**Mage**: Dynamic blocks with reduce_output configuration
+
+### Pattern 3: Conditional Execution
+
+**Prefect**: Conditional tasks based on state
+**Mage**: Conditional blocks that gate downstream execution
+
+## Additional Resources
+
+- [Mage Core Concepts](/core-concepts)
+- [Block Types](/pipelines/blocks)
+- [Dynamic Blocks](/pipelines/dynamic-blocks)
+- [Scheduling & Orchestration](/orchestration/overview)
+- [Testing](/development/testing)
+
+## Getting Help
+
+- [Mage Community Slack](https://www.mage.ai/chat)
+- [GitHub Discussions](https://github.com/mage-ai/mage-ai/discussions)
+- [Documentation](https://docs.mage.ai)

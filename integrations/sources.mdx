@@ -1,0 +1,438 @@
+---
+title: 'Data Sources'
+description: 'Complete list of available data sources and their configurations'
+---
+
+Mage supports 50+ data sources across databases, cloud storage, APIs, and SaaS platforms. Each source connector handles schema discovery, data extraction, and incremental syncing.
+
+## Database Sources
+
+Connect to relational and NoSQL databases with support for incremental syncs and change data capture.
+
+<CardGroup cols={2}>
+  <Card title="PostgreSQL" icon="elephant">
+    Full table, incremental, and log-based CDC replication
+  </Card>
+  <Card title="MySQL" icon="database">
+    Support for all replication methods including binlog CDC
+  </Card>
+  <Card title="BigQuery" icon="google">
+    Native integration with Google BigQuery datasets
+  </Card>
+  <Card title="Snowflake" icon="snowflake">
+    Query data from Snowflake data warehouse
+  </Card>
+  <Card title="Redshift" icon="aws">
+    Amazon Redshift data warehouse integration
+  </Card>
+  <Card title="MongoDB" icon="leaf">
+    NoSQL document database with change stream support
+  </Card>
+  <Card title="Microsoft SQL Server" icon="microsoft">
+    MSSQL database with CDC capabilities
+  </Card>
+  <Card title="OracleDB" icon="database">
+    Oracle database enterprise integration
+  </Card>
+</CardGroup>
+
+### PostgreSQL
+
+Extract data from PostgreSQL with support for logical replication.
+
+**Configuration:**
+
+```json
+{
+  "host": "localhost",
+  "port": 5432,
+  "database": "production",
+  "schema": "public",
+  "username": "mage_user",
+  "password": "secure_password",
+  "replication_slot": "mage_slot",
+  "publication_name": "mage_pub"
+}
+```
+
+**Replication Methods:**
+- Full Table
+- Incremental (based on timestamp/integer columns)
+- Log-Based CDC (requires replication slot setup)
+
+**Example:**
+
+```python
+from mage_integrations.sources.postgresql import PostgreSQL
+
+source = PostgreSQL(
+    config={
+        'host': 'postgres.example.com',
+        'port': 5432,
+        'database': 'production',
+        'schema': 'public',
+        'username': 'readonly',
+        'password': 'password123',
+    }
+)
+
+# Discover tables
+catalog = source.discover()
+
+# Load data from specific tables
+for records in source.load_data(stream, bookmarks={}):
+    print(records)
+```
+
+<Accordion title="Setting up PostgreSQL CDC">
+For log-based replication, configure a replication slot:
+
+```sql
+-- Create publication
+CREATE PUBLICATION mage_pub FOR ALL TABLES;
+
+-- Create replication slot
+SELECT * FROM pg_create_logical_replication_slot('mage_slot', 'pgoutput');
+
+-- Grant permissions
+GRANT SELECT ON ALL TABLES IN SCHEMA public TO mage_user;
+GRANT USAGE ON SCHEMA public TO mage_user;
+```
+</Accordion>
+
+### BigQuery
+
+Query data from Google BigQuery datasets.
+
+**Configuration:**
+
+```json
+{
+  "path_to_credentials_json_file": "/path/to/credentials.json",
+  "dataset": "my_dataset"
+}
+```
+
+**Alternative (using credentials info):**
+
+```json
+{
+  "credentials_info": {
+    "type": "service_account",
+    "project_id": "my-project",
+    "private_key_id": "key-id",
+    "private_key": "-----BEGIN PRIVATE KEY-----\n...",
+    "client_email": "service-account@project.iam.gserviceaccount.com"
+  },
+  "dataset": "analytics"
+}
+```
+
+### Snowflake
+
+Connect to Snowflake data warehouse with password or private key authentication.
+
+**Configuration:**
+
+```json
+{
+  "account": "xy12345.us-east-1",
+  "warehouse": "COMPUTE_WH",
+  "database": "PRODUCTION",
+  "schema": "PUBLIC",
+  "username": "MAGE_USER",
+  "password": "password123",
+  "role": "ANALYST"
+}
+```
+
+**Private Key Authentication:**
+
+```json
+{
+  "account": "xy12345.us-east-1",
+  "warehouse": "COMPUTE_WH",
+  "database": "PRODUCTION",
+  "schema": "PUBLIC",
+  "username": "MAGE_USER",
+  "private_key_file": "/path/to/rsa_key.p8",
+  "private_key_file_pwd": "key_password"
+}
+```
+
+## Cloud Storage Sources
+
+Read files from cloud storage services in various formats.
+
+<CardGroup cols={3}>
+  <Card title="Amazon S3" icon="aws">
+    CSV, Parquet files from S3 buckets
+  </Card>
+  <Card title="Google Cloud Storage" icon="google">
+    GCS object storage integration
+  </Card>
+  <Card title="Azure Blob Storage" icon="microsoft">
+    Azure storage container support
+  </Card>
+</CardGroup>
+
+### Amazon S3
+
+Read CSV and Parquet files from S3 buckets.
+
+**Configuration:**
+
+```json
+{
+  "aws_access_key_id": "AKIAIOSFODNN7EXAMPLE",
+  "aws_secret_access_key": "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+  "aws_region": "us-west-2",
+  "bucket": "my-data-bucket",
+  "prefix": "data/exports/",
+  "search_pattern": ".*\\.csv$",
+  "file_type": "csv"
+}
+```
+
+**IAM Role Authentication:**
+
+```json
+{
+  "role_arn": "arn:aws:iam::123456789012:role/MageDataRole",
+  "role_session_name": "mage-data-integration",
+  "aws_region": "us-west-2",
+  "bucket": "my-data-bucket",
+  "prefix": "exports/",
+  "file_type": "parquet"
+}
+```
+
+**Features:**
+- Supports CSV and Parquet file formats
+- Regex pattern matching for file selection
+- Automatic schema inference
+- Incremental sync based on file modification time
+- Multiple stream configuration with `table_configs`
+
+## SaaS & API Sources
+
+Connect to popular SaaS platforms and APIs.
+
+<CardGroup cols={3}>
+  <Card title="Stripe" icon="stripe">
+    Payment and subscription data
+  </Card>
+  <Card title="Salesforce" icon="salesforce">
+    CRM data via SOAP/REST API
+  </Card>
+  <Card title="HubSpot" icon="hubspot">
+    Marketing and CRM platform
+  </Card>
+  <Card title="Google Analytics" icon="chart-line">
+    Website analytics data
+  </Card>
+  <Card title="Facebook Ads" icon="facebook">
+    Ad campaign performance
+  </Card>
+  <Card title="Google Ads" icon="google">
+    Advertising campaign data
+  </Card>
+  <Card title="Zendesk" icon="ticket">
+    Customer support tickets
+  </Card>
+  <Card title="Intercom" icon="messages">
+    Customer messaging data
+  </Card>
+  <Card title="GitHub" icon="github">
+    Repository and issue data
+  </Card>
+</CardGroup>
+
+### Stripe
+
+Sync payment, customer, and subscription data from Stripe.
+
+**Configuration:**
+
+```json
+{
+  "account_id": "acct_1234567890",
+  "client_secret": "sk_live_51Abc...",
+  "start_date": "2024-01-01T00:00:00Z"
+}
+```
+
+**Available Streams:**
+- charges
+- customers
+- subscriptions
+- invoices
+- payment_intents
+- balance_transactions
+- payouts
+- products
+- plans
+
+### Salesforce
+
+Extract data from Salesforce CRM.
+
+**Configuration:**
+
+```json
+{
+  "username": "user@company.com",
+  "password": "password",
+  "security_token": "security_token",
+  "is_sandbox": false,
+  "start_date": "2024-01-01T00:00:00Z"
+}
+```
+
+## Other Sources
+
+<Accordion title="Airtable">
+**Description:** Sync data from Airtable bases and tables.
+
+**Configuration:**
+```json
+{
+  "api_key": "keyXXXXXXXXXXXXXX",
+  "base_id": "appXXXXXXXXXXXXXX",
+  "table_names": ["Contacts", "Companies"]
+}
+```
+</Accordion>
+
+<Accordion title="Amplitude">
+**Description:** Extract product analytics events from Amplitude.
+
+**Configuration:**
+```json
+{
+  "api_key": "your-api-key",
+  "secret_key": "your-secret-key",
+  "start_date": "2024-01-01"
+}
+```
+</Accordion>
+
+<Accordion title="Google Sheets">
+**Description:** Read data from Google Sheets spreadsheets.
+
+**Configuration:**
+```json
+{
+  "spreadsheet_id": "1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgvE2upms",
+  "credentials_info": {...}
+}
+```
+</Accordion>
+
+<Accordion title="DynamoDB">
+**Description:** Scan and query Amazon DynamoDB tables.
+
+**Configuration:**
+```json
+{
+  "aws_access_key_id": "AKIAIOSFODNN7EXAMPLE",
+  "aws_secret_access_key": "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+  "region_name": "us-east-1"
+}
+```
+</Accordion>
+
+<Accordion title="MongoDB">
+**Description:** Extract documents from MongoDB collections.
+
+**Configuration:**
+```json
+{
+  "host": "localhost",
+  "port": 27017,
+  "database": "production",
+  "username": "mage",
+  "password": "password",
+  "auth_source": "admin"
+}
+```
+</Accordion>
+
+## Complete Source List
+
+All available sources in Mage:
+
+- Airtable
+- Amazon S3
+- Amplitude
+- API (Generic REST)
+- Azure Blob Storage
+- BigQuery
+- Chargebee
+- Commercetools
+- Couchbase
+- Datadog
+- Doris
+- Dremio
+- DynamoDB
+- Facebook Ads
+- Freshdesk
+- Front
+- GitHub
+- Google Ads
+- Google Analytics
+- Google Cloud Storage
+- Google Search Console
+- Google Sheets
+- HubSpot
+- Intercom
+- Knowi
+- LinkedIn Ads
+- Microsoft SQL Server
+- Mode
+- Monday
+- MongoDB
+- MySQL
+- OracleDB
+- Outreach
+- Paystack
+- Pipedrive
+- PostgreSQL
+- Postmark
+- PowerBI
+- Redshift
+- Salesforce
+- SFTP
+- Snowflake
+- Stripe
+- Tableau
+- Teradata
+- Twitter Ads
+- Zendesk
+
+## Installation
+
+Install source-specific dependencies:
+
+```bash
+# PostgreSQL
+pip install "mage-ai[postgres]"
+
+# BigQuery
+pip install "mage-ai[bigquery]"
+
+# Snowflake
+pip install "mage-ai[snowflake]"
+
+# S3
+pip install "mage-ai[s3]"
+
+# All integrations
+pip install "mage-ai[all]"
+```
+
+## Next Steps
+
+<Card title="Destinations" icon="warehouse" href="/integrations/destinations">
+  Learn about available data destinations
+</Card>

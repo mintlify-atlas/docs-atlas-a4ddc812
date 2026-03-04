@@ -1,0 +1,188 @@
+---
+title: 'mage clean commands'
+description: 'Clean old logs and cached variables'
+---
+
+## Overview
+
+Mage provides two clean commands for maintenance tasks: cleaning old logs and removing cached variables from your project.
+
+## clean_old_logs
+
+### Signature
+
+```bash
+mage clean-old-logs [PROJECT_PATH] [OPTIONS]
+```
+
+### Arguments
+
+<ParamField path="project_path" type="string" required>
+  Path of the Mage project to clean old logs.
+</ParamField>
+
+### Options
+
+<ParamField path="--pipeline-uuid" type="string" default="None">
+  UUID of the pipeline to clean logs for. If not specified, cleans logs for all pipelines.
+</ParamField>
+
+### Examples
+
+<CodeGroup>
+
+```bash Clean all logs
+mage clean-old-logs /path/to/project
+```
+
+```bash Clean logs for specific pipeline
+mage clean-old-logs /path/to/project --pipeline-uuid my_pipeline
+```
+
+```bash Clean logs in current directory
+mage clean-old-logs .
+```
+
+</CodeGroup>
+
+### Behavior
+
+When you run `mage clean-old-logs`, the command:
+
+1. Sets the repository path to the specified project directory
+2. Retrieves the logger manager for the specified pipeline (or all pipelines)
+3. Deletes old log files based on retention policies
+4. Frees up disk space by removing outdated logs
+
+### Implementation Details
+
+The command is implemented in `mage_ai/cli/main.py:294-310`:
+
+```python
+@app.command()
+def clean_old_logs(
+    project_path: str = CLEAN_LOGS_PROJECT_PATH_DEFAULT,
+    pipeline_uuid: str = CLEAN_LOGS_PIPELINE_UUID_DEFAULT,
+):
+    from mage_ai.settings.repo import set_repo_path
+
+    project_path = os.path.abspath(project_path)
+    set_repo_path(project_path)
+
+    from mage_ai.data_preparation.logging.logger_manager_factory import (
+        LoggerManagerFactory,
+    )
+
+    LoggerManagerFactory.get_logger_manager(
+        pipeline_uuid=pipeline_uuid,
+    ).delete_old_logs()
+```
+
+---
+
+## clean_cached_variables
+
+### Signature
+
+```bash
+mage clean-cached-variables [PROJECT_PATH] [OPTIONS]
+```
+
+### Arguments
+
+<ParamField path="project_path" type="string" required>
+  Path of the Mage project to clean variables.
+</ParamField>
+
+### Options
+
+<ParamField path="--pipeline-uuid" type="string" default="None">
+  UUID of the pipeline to clean cached variables for. If not specified, cleans variables for all pipelines.
+</ParamField>
+
+### Examples
+
+<CodeGroup>
+
+```bash Clean all cached variables
+mage clean-cached-variables /path/to/project
+```
+
+```bash Clean variables for specific pipeline
+mage clean-cached-variables /path/to/project --pipeline-uuid my_pipeline
+```
+
+```bash Clean variables in current directory
+mage clean-cached-variables .
+```
+
+</CodeGroup>
+
+### Behavior
+
+When you run `mage clean-cached-variables`, the command:
+
+1. Sets the repository path to the specified project directory
+2. Locates cached variable files for the specified pipeline (or all pipelines)
+3. Removes cached variable data
+4. Frees up storage space and clears outdated cache
+
+### Implementation Details
+
+The command is implemented in `mage_ai/cli/main.py:279-291`:
+
+```python
+@app.command()
+def clean_cached_variables(
+    project_path: str = CLEAN_VARIABLES_PROJECT_PATH_DEFAULT,
+    pipeline_uuid: str = CLEAN_VARIABLES_PIPELINE_UUID_DEFAULT,
+):
+    from mage_ai.settings.repo import set_repo_path
+
+    project_path = os.path.abspath(project_path)
+    set_repo_path(project_path)
+
+    from mage_ai.data_preparation.variable_manager import clean_variables
+
+    clean_variables(pipeline_uuid=pipeline_uuid)
+```
+
+---
+
+## Use Cases
+
+### Disk Space Management
+
+Both clean commands are useful for managing disk space in production environments:
+
+- Use `clean-old-logs` regularly to prevent log files from consuming excessive disk space
+- Use `clean-cached-variables` to remove outdated cached data from development or test runs
+
+### Maintenance Workflows
+
+Incorporate these commands into maintenance scripts:
+
+```bash
+#!/bin/bash
+# Weekly maintenance script
+
+PROJECT_PATH="/path/to/mage/project"
+
+# Clean old logs
+mage clean-old-logs $PROJECT_PATH
+
+# Clean cached variables
+mage clean-cached-variables $PROJECT_PATH
+
+echo "Maintenance completed"
+```
+
+### Pipeline-Specific Cleanup
+
+Clean up after specific pipelines during development:
+
+```bash
+# After testing a pipeline
+mage clean-cached-variables . --pipeline-uuid test_pipeline
+mage clean-old-logs . --pipeline-uuid test_pipeline
+```

@@ -1,0 +1,538 @@
+---
+title: 'Debugging and Logging'
+description: 'Learn how to debug blocks and use logging effectively in Mage pipelines'
+---
+
+## Overview
+
+Mage provides comprehensive logging and debugging capabilities for tracking execution, identifying issues, and monitoring pipeline performance.
+
+## Logging Architecture
+
+Mage uses a hierarchical logging system with different managers for different storage backends:
+
+```python
+# From mage_ai/data_preparation/logging/logger_manager.py
+
+class LoggerManager:
+    def __init__(
+        self,
+        repo_path: str = None,
+        logs_dir: str = None,
+        pipeline_uuid: str = None,
+        block_uuid: str = None,
+        filename: str = None,
+        partition: str = None,
+        repo_config: RepoConfig = None,
+        subpartition: str = None,
+    ):
+        """
+        Initialize the LoggerManager.
+        
+        Args:
+            repo_path: Root directory path of the repository
+            logs_dir: Directory path where logs will be stored
+            pipeline_uuid: Unique identifier for the pipeline
+            block_uuid: Unique identifier for the block
+            partition: Partition identifier (e.g., execution date)
+            subpartition: Subpartition identifier
+        """
+```
+
+## Logger Types
+
+### DictLogger
+
+Structured logging with JSON output:
+
+```python
+# From mage_ai/data_preparation/logging/logger.py
+
+from mage_ai.data_preparation.logging.logger import DictLogger
+import logging
+
+class DictLogger():
+    def __init__(self, logger: logging.Logger, logging_tags: Dict = None):
+        self.logger = logger
+        self.logging_tags = logging_tags or dict()
+
+    def info(self, message, **kwargs):
+        """Log info message with structured data."""
+        self.__send_message('info', message, **kwargs)
+    
+    def error(self, message, **kwargs):
+        """Log error message with structured data."""
+        self.__send_message('error', message, **kwargs)
+    
+    def warning(self, message, **kwargs):
+        """Log warning message with structured data."""
+        self.__send_message('warning', message, **kwargs)
+```
+
+### Usage in Blocks
+
+```python
+if 'data_loader' not in globals():
+    from mage_ai.data_preparation.decorators import data_loader
+
+@data_loader
+def load_data(**kwargs):
+    """
+    Load data with logging.
+    """
+    # Access the logger from kwargs
+    logger = kwargs.get('logger')
+    
+    if logger:
+        logger.info('Starting data load', 
+                    source='api',
+                    records_expected=1000)
+        
+        try:
+            data = fetch_data_from_api()
+            logger.info('Data loaded successfully',
+                       records_loaded=len(data))
+        except Exception as e:
+            logger.error('Failed to load data',
+                        error=str(e))
+            raise
+    
+    return data
+```
+
+## Log Levels
+
+Mage supports standard Python logging levels:
+
+```python
+import logging
+
+# Configure log level in repo_config
+logging_config = LoggingConfig.load(config={
+    'level': 'INFO'  # DEBUG, INFO, WARNING, ERROR, CRITICAL
+})
+
+logger.setLevel(logging.INFO)
+```
+
+### Log Level Usage
+
+```python
+@transformer
+def transform(data, **kwargs):
+    logger = kwargs.get('logger')
+    
+    # DEBUG - Detailed diagnostic information
+    logger.debug(f'Input data shape: {data.shape}')
+    logger.debug(f'Column dtypes: {data.dtypes.to_dict()}')
+    
+    # INFO - General informational messages  
+    logger.info(f'Processing {len(data)} records')
+    
+    # WARNING - Warning messages for potential issues
+    if len(data) == 0:
+        logger.warning('No data to process')
+    
+    # ERROR - Error messages for failures
+    try:
+        result = process(data)
+    except Exception as e:
+        logger.error(f'Processing failed: {str(e)}')
+        raise
+    
+    # CRITICAL - Critical failures
+    if result is None:
+        logger.critical('Processing returned None - data loss!')
+    
+    return result
+```
+
+## Log File Structure
+
+Logs are organized by pipeline, partition, and block:
+
+```python
+# From mage_ai/data_preparation/logging/logger_manager.py
+
+def get_log_filepath(self, create_dir: bool = False):
+    """
+    Get the full log file path.
+    
+    Structure:
+    logs_dir/
+      pipelines/
+        [pipeline_uuid]/
+          logs/
+            [partition]/
+              [subpartition]/
+                [block_uuid].log
+                pipeline.log
+    """
+    logs_dir = self.logs_dir or LOGS_DIR_PATH
+    
+    prefix = os.path.join(
+        logs_dir,
+        'pipelines',
+        self.pipeline_uuid or 'all_pipelines',
+        'logs',
+        self.partition or '',
+        self.subpartition or '',
+    )
+    
+    if self.block_uuid is None:
+        log_filepath = os.path.join(prefix, 'pipeline.log')
+    else:
+        log_filepath = os.path.join(prefix, f'{self.block_uuid}.log')
+    
+    return log_filepath
+```
+
+## Viewing Logs
+
+### In the Notebook UI
+
+Logs appear in real-time in the block output panel:
+
+```python
+@data_loader
+def load_data(**kwargs):
+    logger = kwargs.get('logger')
+    
+    # These messages appear in the UI immediately
+    logger.info('Step 1: Connecting to database')
+    logger.info('Step 2: Executing query')
+    logger.info('Step 3: Loading results')
+    
+    return data
+```
+
+### Accessing Log Files
+
+```python
+# From mage_ai/data_preparation/logging/logger_manager.py
+
+def get_logs(self):
+    """
+    Get logs from the current log file.
+    
+    Returns:
+        dict: A dictionary containing the logs with content
+    """
+    file = File.from_path(self.get_log_filepath())
+    return file.to_dict(include_content=True)
+
+async def get_logs_async(self):
+    """
+    Get logs asynchronously.
+    """
+    file = File.from_path(self.get_log_filepath())
+    return await file.to_dict_async(include_content=True)
+```
+
+## Print Statements
+
+Regular print statements are captured and displayed:
+
+```python
+@data_loader
+def load_data(**kwargs):
+    # Print statements appear in the UI
+    print('Starting data load...')
+    
+    data = load_csv('data.csv')
+    print(f'Loaded {len(data)} rows')
+    
+    # Print dataframe info
+    print(data.head())
+    print(data.describe())
+    
+    return data
+```
+
+<Note>
+  Print statements are redirected to the logger and stored in log files along with structured log messages.
+</Note>
+
+## Stream Redirection
+
+Mage redirects stdout and stderr to capture all output:
+
+```python
+# From mage_ai/data_preparation/shared/stream.py
+
+from contextlib import redirect_stdout, redirect_stderr
+
+with redirect_stdout(stream), redirect_stderr(stream):
+    # All print statements and errors are captured
+    block.execute_sync()
+```
+
+## Error Handling and Stack Traces
+
+Mage captures full stack traces for errors:
+
+```python
+@transformer
+def transform(data, **kwargs):
+    logger = kwargs.get('logger')
+    
+    try:
+        result = risky_operation(data)
+    except ValueError as e:
+        # Log error with context
+        logger.error(
+            'Validation error during transformation',
+            error_type=type(e).__name__,
+            error_message=str(e),
+            data_shape=data.shape,
+        )
+        raise
+    except Exception as e:
+        # Log unexpected errors
+        logger.critical(
+            'Unexpected error',
+            error_type=type(e).__name__,
+            error_message=str(e),
+        )
+        raise
+    
+    return result
+```
+
+## Structured Logging
+
+DictLogger outputs JSON-formatted logs:
+
+```python
+# From mage_ai/data_preparation/logging/logger.py
+
+def __send_message(
+    self,
+    method_name,
+    message,
+    error=None,
+    log_level=None,
+    **kwargs,
+):
+    now = datetime.utcnow()
+    data = dict(
+        level=logging.getLevelName(log_level) if log_level else method_name.upper(),
+        message=message,
+        timestamp=now.timestamp(),
+        uuid=uuid.uuid4().hex,
+    )
+    
+    if error:
+        data['error'] = traceback.format_exc()
+        data['error_stack'] = traceback.format_stack()
+        data['error_stacktrace'] = str(error)
+    
+    # Merge with logging tags and custom kwargs
+    msg = simplejson.dumps(
+        merge_dict(self.logging_tags or dict(), merge_dict(kwargs, data)),
+        default=encode_complex,
+        ignore_nan=True,
+    )
+    
+    getattr(self.logger, method_name)(msg)
+```
+
+### Example Structured Log Output
+
+```json
+{
+  "level": "INFO",
+  "message": "Processing batch",
+  "timestamp": 1698765432.123,
+  "uuid": "a1b2c3d4e5f6",
+  "pipeline_uuid": "my_pipeline",
+  "block_uuid": "load_data",
+  "batch_size": 1000,
+  "records_processed": 5000
+}
+```
+
+## Log Retention
+
+Configure automatic log cleanup:
+
+```python
+# From mage_ai/data_preparation/logging/logger_manager.py
+
+def delete_old_logs(self):
+    """
+    Delete old log files based on retention period.
+    """
+    log_retention_period = self.logging_config.retention_period
+    if not log_retention_period:
+        return
+    
+    # Calculate minimum partition to keep
+    min_partition = (
+        datetime.utcnow() - str_to_timedelta(log_retention_period)
+    ).strftime(format='%Y%m%dT%H%M%S')
+    
+    # Remove old partitions
+    for partition in execution_partitions:
+        if partition <= min_partition:
+            self.storage.remove_dir(partition_path)
+```
+
+Configure in `metadata.yaml`:
+
+```yaml
+logging_config:
+  retention_period: "30d"  # Keep logs for 30 days
+  level: INFO
+```
+
+## Debugging Techniques
+
+### Inspecting Variables
+
+```python
+@transformer
+def transform(data, **kwargs):
+    logger = kwargs.get('logger')
+    
+    # Log variable values
+    logger.debug(f'Input type: {type(data)}')
+    logger.debug(f'Input shape: {getattr(data, "shape", "N/A")}')
+    
+    # Log sample data
+    if hasattr(data, 'head'):
+        logger.debug(f'Sample data:\n{data.head().to_string()}')
+    
+    # Log statistics
+    if hasattr(data, 'describe'):
+        logger.info(f'Data statistics:\n{data.describe().to_string()}')
+    
+    return data
+```
+
+### Conditional Debugging
+
+```python
+@data_loader
+def load_data(**kwargs):
+    logger = kwargs.get('logger')
+    env = kwargs.get('env', 'dev')
+    
+    # Enable verbose logging in dev
+    if env == 'dev':
+        logger.setLevel(logging.DEBUG)
+        logger.debug('Debug mode enabled')
+    
+    # Detailed logging for specific conditions
+    data = fetch_data()
+    
+    if len(data) < 100 and env == 'dev':
+        logger.warning('Small dataset detected in dev')
+        logger.debug(f'Full dataset:\n{data}')
+    
+    return data
+```
+
+### Timing and Performance
+
+```python
+import time
+
+@transformer
+def transform(data, **kwargs):
+    logger = kwargs.get('logger')
+    
+    start_time = time.time()
+    logger.info('Starting transformation')
+    
+    # Step 1
+    step_start = time.time()
+    result = step1(data)
+    logger.info(f'Step 1 completed in {time.time() - step_start:.2f}s')
+    
+    # Step 2
+    step_start = time.time()
+    result = step2(result)
+    logger.info(f'Step 2 completed in {time.time() - step_start:.2f}s')
+    
+    total_time = time.time() - start_time
+    logger.info(f'Total transformation time: {total_time:.2f}s')
+    
+    return result
+```
+
+## Debug Mode
+
+Enable debug mode for verbose output:
+
+```python
+# From mage_ai/shared/environments.py
+
+from mage_ai.shared.environments import is_debug
+
+if is_debug():
+    print(f'Debug info: {detailed_information}')
+```
+
+## Best Practices
+
+<Steps>
+  <Step title="Use appropriate log levels">
+    DEBUG for detailed diagnostics, INFO for progress, WARNING for issues, ERROR for failures
+  </Step>
+  
+  <Step title="Include context in log messages">
+    Add relevant metadata like record counts, IDs, timestamps to help debugging
+  </Step>
+  
+  <Step title="Log at key checkpoints">
+    Log before and after major operations to track execution flow
+  </Step>
+  
+  <Step title="Use structured logging">
+    Pass additional context as kwargs for better searchability
+  </Step>
+  
+  <Step title="Avoid logging sensitive data">
+    Don't log passwords, API keys, or PII
+  </Step>
+</Steps>
+
+<Tip>
+  Use `logger.debug()` for detailed information during development, then keep it in the code - it won't appear in production with INFO level.
+</Tip>
+
+<Warning>
+  Excessive logging can impact performance. Avoid logging inside tight loops or high-frequency operations.
+</Warning>
+
+## Remote Logging
+
+Mage supports remote log storage (S3, GCS):
+
+```python
+# From mage_ai/data_preparation/logging/s3_logger_manager.py
+
+class S3LoggerManager(LoggerManager):
+    def upload_logs(self, key: str, logs: str) -> None:
+        """
+        Upload logs to S3.
+        """
+        # Upload to configured S3 bucket
+```
+
+Configure in `metadata.yaml`:
+
+```yaml
+logging_config:
+  destination_config:
+    type: s3
+    bucket: my-logs-bucket
+    prefix: mage-logs/
+```
+
+## Next Steps
+
+- Learn about [testing blocks](/development/testing)
+- Understand [variables and secrets](/development/variables)
+- Explore [writing block code](/development/writing-code)

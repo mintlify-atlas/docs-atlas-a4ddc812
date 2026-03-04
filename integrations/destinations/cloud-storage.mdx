@@ -1,0 +1,612 @@
+---
+title: 'Cloud Storage Destinations'
+description: 'Export data to S3, Google Cloud Storage, Azure Blob Storage, and Delta Lake'
+icon: 'cloud'
+---
+
+Mage supports exporting data to major cloud storage platforms and open table formats. These destinations are ideal for data lakes, long-term storage, and integration with analytics engines.
+
+## Supported Cloud Storage
+
+<CardGroup cols={2}>
+  <Card title="Amazon S3" icon="aws">
+    AWS object storage with S3 API compatibility
+  </Card>
+  <Card title="Google Cloud Storage" icon="google">
+    Google Cloud's scalable object storage
+  </Card>
+  <Card title="Delta Lake (S3)" icon="database">
+    Open table format on Amazon S3
+  </Card>
+  <Card title="Delta Lake (Azure)" icon="microsoft">
+    Open table format on Azure Blob Storage
+  </Card>
+</CardGroup>
+
+## Amazon S3
+
+### Configuration
+
+<CodeGroup>
+```yaml Access Key Authentication
+bucket: my-data-bucket
+object_key_path: raw/events
+table: user_events
+file_type: parquet  # or csv
+aws_access_key_id: AKIAIOSFODNN7EXAMPLE
+aws_secret_access_key: wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
+aws_region: us-west-2
+```
+
+```yaml IAM Role Authentication
+bucket: my-data-bucket
+object_key_path: raw/events
+table: user_events
+file_type: parquet
+role_arn: arn:aws:iam::123456789012:role/MageDataRole
+role_session_name: mage-data-integration
+aws_region: us-west-2
+```
+
+```yaml With Date Partitioning
+bucket: my-data-bucket
+object_key_path: raw/events
+table: user_events
+file_type: parquet
+aws_access_key_id: AKIAIOSFODNN7EXAMPLE
+aws_secret_access_key: wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
+aws_region: us-west-2
+date_partition_format: "%Y/%m/%d"  # Creates year/month/day folders
+```
+
+```yaml Custom S3 Endpoint
+bucket: my-data-bucket
+object_key_path: raw/events
+table: user_events
+file_type: parquet
+aws_access_key_id: AKIAIOSFODNN7EXAMPLE
+aws_secret_access_key: wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
+aws_region: us-west-2
+aws_endpoint: https://s3.custom-endpoint.com  # For S3-compatible storage
+```
+</CodeGroup>
+
+### Features
+
+- **Multiple file formats** - Parquet (recommended) and CSV
+- **IAM role support** - Secure credential-less authentication
+- **Date partitioning** - Automatic folder organization by date
+- **Custom endpoints** - Support for MinIO, Wasabi, and other S3-compatible storage
+- **Column header formatting** - Lowercase or uppercase column names
+- **Automatic compression** - Built-in Parquet compression
+
+### File Naming Convention
+
+Files are automatically named with timestamps:
+
+```
+s3://bucket/object_key_path/table/YYYYMMDD-HHMMSS.parquet
+```
+
+With date partitioning:
+
+```
+s3://bucket/object_key_path/table/2024/03/04/20240304-153045.parquet
+```
+
+### Parquet Format (Recommended)
+
+Parquet provides:
+- **Columnar storage** - Efficient compression and query performance
+- **Schema preservation** - Maintains data types
+- **Fast reads** - Optimized for analytics
+- **Small file size** - 5-10x smaller than CSV
+
+```yaml
+file_type: parquet
+```
+
+### CSV Format
+
+Use CSV for compatibility:
+
+```yaml
+file_type: csv
+column_header_format: lower  # or upper
+```
+
+### Date Partitioning
+
+Organize data by date for efficient querying:
+
+```yaml
+date_partition_format: "%Y/%m/%d"        # 2024/03/04/
+date_partition_format: "%Y-%m-%d"        # 2024-03-04/
+date_partition_format: "year=%Y/month=%m" # year=2024/month=03/
+```
+
+### S3-Compatible Storage
+
+Connect to MinIO, Wasabi, DigitalOcean Spaces, etc.:
+
+```yaml
+aws_endpoint: https://s3.us-east-005.backblazeb2.com
+# or
+aws_endpoint: http://minio.local:9000
+```
+
+## Google Cloud Storage (GCS)
+
+### Configuration
+
+<CodeGroup>
+```yaml Service Account Key
+bucket: my-gcs-bucket
+object_key_path: raw/events
+table: user_events
+file_type: parquet
+google_application_credentials: /path/to/service-account.json
+```
+
+```yaml Application Default Credentials
+bucket: my-gcs-bucket
+object_key_path: raw/events
+table: user_events
+file_type: parquet
+# Uses application default credentials from environment
+```
+
+```yaml With Date Partitioning
+bucket: my-gcs-bucket
+object_key_path: raw/events
+table: user_events
+file_type: parquet
+google_application_credentials: /path/to/service-account.json
+date_partition_format: "%Y/%m/%d"
+```
+</CodeGroup>
+
+### Features
+
+- **Service account authentication** - Secure access with JSON key files
+- **Application default credentials** - Use GCE/GKE service accounts
+- **Parquet and CSV** - Multiple file format support
+- **Date partitioning** - Organize data by date
+- **Automatic retries** - Built-in error handling
+
+### File Structure
+
+GCS files follow the same convention as S3:
+
+```
+gs://bucket/object_key_path/table/20240304-153045.parquet
+```
+
+With partitioning:
+
+```
+gs://bucket/object_key_path/table/2024/03/04/20240304-153045.parquet
+```
+
+### Authentication Methods
+
+<Accordion title="Service Account JSON Key">
+  Create a service account with Storage Object Creator role:
+  
+  ```bash
+  # Create service account
+  gcloud iam service-accounts create mage-data-exporter \
+    --display-name="Mage Data Exporter"
+  
+  # Grant Storage Object Creator role
+  gcloud projects add-iam-policy-binding PROJECT_ID \
+    --member="serviceAccount:mage-data-exporter@PROJECT_ID.iam.gserviceaccount.com" \
+    --role="roles/storage.objectCreator"
+  
+  # Create and download key
+  gcloud iam service-accounts keys create key.json \
+    --iam-account=mage-data-exporter@PROJECT_ID.iam.gserviceaccount.com
+  ```
+  
+  Reference in config:
+  ```yaml
+  google_application_credentials: /path/to/key.json
+  ```
+</Accordion>
+
+<Accordion title="Application Default Credentials">
+  When running on GCP (GCE, GKE, Cloud Run):
+  
+  1. Attach a service account to your compute instance
+  2. Grant Storage Object Creator role to the service account
+  3. Omit `google_application_credentials` from config
+  
+  Mage automatically uses the attached service account.
+</Accordion>
+
+## Delta Lake on S3
+
+### Configuration
+
+<CodeGroup>
+```yaml Basic Configuration
+bucket: my-delta-bucket
+object_key_path: delta/tables
+table: user_events
+aws_access_key_id: AKIAIOSFODNN7EXAMPLE
+aws_secret_access_key: wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
+aws_region: us-west-2
+```
+
+```yaml With Partitioning
+bucket: my-delta-bucket
+object_key_path: delta/tables
+table: user_events
+aws_access_key_id: AKIAIOSFODNN7EXAMPLE
+aws_secret_access_key: wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
+aws_region: us-west-2
+partition_keys:
+  - event_date
+  - region
+```
+
+```yaml Overwrite Mode
+bucket: my-delta-bucket
+object_key_path: delta/tables
+table: user_events
+aws_access_key_id: AKIAIOSFODNN7EXAMPLE
+aws_secret_access_key: wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
+aws_region: us-west-2
+mode: overwrite  # or append (default)
+partition_keys:
+  - event_date
+```
+</CodeGroup>
+
+### Features
+
+- **ACID transactions** - Reliable writes with transaction log
+- **Schema evolution** - Add/modify columns safely
+- **Time travel** - Query historical versions
+- **Partition management** - Automatic partition handling
+- **Overwrite mode** - Replace specific partitions
+- **Data versioning** - Track all changes with _delta_log
+
+### Delta Lake Structure
+
+Delta Lake creates a table directory with:
+
+```
+s3://bucket/object_key_path/table/
+├── _delta_log/
+│   ├── 00000000000000000000.json
+│   ├── 00000000000000000001.json
+│   └── _last_checkpoint
+├── part-00000-xxx.snappy.parquet
+├── part-00001-xxx.snappy.parquet
+└── ...
+```
+
+### Write Modes
+
+<Accordion title="Append Mode (Default)">
+  Add new data without modifying existing records:
+  
+  ```yaml
+  mode: append
+  ```
+  
+  - Fastest write mode
+  - Always creates new files
+  - Ideal for immutable data
+</Accordion>
+
+<Accordion title="Overwrite Mode">
+  Replace data, optionally by partition:
+  
+  ```yaml
+  mode: overwrite
+  partition_keys:
+    - event_date
+  ```
+  
+  When partitioned:
+  - Only replaces affected partitions
+  - Other partitions remain unchanged
+  - Useful for daily/hourly updates
+  
+  When not partitioned:
+  - Replaces entire table
+  - Use with caution
+</Accordion>
+
+### Partition Overwrite
+
+When using overwrite mode with partitions, Mage:
+1. Writes new data to Delta table
+2. Identifies affected partitions
+3. Removes old files from those partitions
+4. Updates Delta transaction log
+
+```yaml
+mode: overwrite
+partition_keys:
+  - date  # Only overwrites data for dates in new batch
+```
+
+### Querying Delta Tables
+
+Delta tables are compatible with:
+- **Apache Spark** - Native support
+- **Databricks** - Full Delta Lake features
+- **Trino/Presto** - Via Delta Lake connector
+- **AWS Athena** - Query Delta tables directly
+- **Delta-RS** - Rust/Python library
+
+```python
+# Query with Delta-RS Python
+import deltalake as dl
+
+dt = dl.DeltaTable("s3://bucket/object_key_path/table")
+df = dt.to_pandas()
+```
+
+## Delta Lake on Azure
+
+### Configuration
+
+```yaml
+account_name: mystorageaccount
+access_key: your_access_key
+table_uri: abfss://container@mystorageaccount.dfs.core.windows.net/path/to/table
+table: user_events
+```
+
+### Features
+
+- **Azure Blob Storage** - Integration with Azure Data Lake Gen2
+- **ACID transactions** - Same Delta Lake guarantees
+- **Schema evolution** - Automatic schema management
+- **Partition support** - Organize data efficiently
+
+### Azure Authentication
+
+```yaml
+account_name: mystorageaccount
+access_key: wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
+```
+
+The table URI format:
+```
+abfss://container@account.dfs.core.windows.net/path/to/table
+```
+
+## Data Type Handling
+
+### Parquet Schema Preservation
+
+Parquet automatically preserves data types:
+
+| Python Type | Parquet Type |
+|------------|-------------|
+| str | STRING |
+| int | INT64 |
+| float | DOUBLE |
+| bool | BOOLEAN |
+| datetime | TIMESTAMP |
+| date | DATE32 |
+| list | LIST |
+| dict | STRUCT |
+
+### CSV Limitations
+
+CSV files lose type information:
+- All columns are strings
+- Datetime formatting may vary
+- Arrays/objects become JSON strings
+
+## Internal Columns
+
+All exports include tracking columns:
+
+- `_mage_created_at` - ISO 8601 timestamp of creation
+- `_mage_updated_at` - ISO 8601 timestamp of last update
+
+```python
+{
+    "user_id": 123,
+    "name": "John Doe",
+    "_mage_created_at": "2024-03-04T15:30:45.123456+00:00",
+    "_mage_updated_at": "2024-03-04T15:30:45.123456+00:00"
+}
+```
+
+## Performance Optimization
+
+<Accordion title="Parquet Optimization">
+  **Use Parquet for Best Performance**
+  ```yaml
+  file_type: parquet
+  ```
+  
+  Parquet provides:
+  - Columnar compression (5-10x smaller files)
+  - Predicate pushdown for faster queries
+  - Schema evolution support
+  - Native type preservation
+  
+  **Compression Settings**
+  Mage uses Snappy compression by default:
+  - Good balance of speed and compression
+  - Fast decompression for queries
+  - ~2-4x compression ratio
+</Accordion>
+
+<Accordion title="Partition Strategy">
+  **Choose Partition Keys Wisely**
+  
+  Good partition keys:
+  - High cardinality but not too high (100-1000s of partitions)
+  - Frequently used in WHERE clauses
+  - Evenly distributed data
+  
+  ```yaml
+  # Good partitioning
+  partition_keys:
+    - date        # ~365 partitions per year
+    - region      # 5-10 regions
+  
+  # Avoid
+  partition_keys:
+    - user_id     # Too many partitions (millions)
+    - timestamp   # Too granular
+  ```
+  
+  **Partition Size Guidelines**
+  - Target 100MB - 1GB per partition
+  - Avoid small files (less than 10MB)
+  - Use date partitioning for time-series data
+</Accordion>
+
+<Accordion title="Delta Lake Optimization">
+  **Optimize Table**
+  
+  Periodically compact small files:
+  ```sql
+  OPTIMIZE delta.`s3://bucket/path/to/table`
+  ```
+  
+  **Vacuum Old Files**
+  
+  Remove old file versions:
+  ```sql
+  VACUUM delta.`s3://bucket/path/to/table` RETAIN 168 HOURS
+  ```
+  
+  **Z-Order Clustering**
+  
+  For frequently filtered columns:
+  ```sql
+  OPTIMIZE delta.`s3://bucket/path/to/table`
+  ZORDER BY (user_id, event_date)
+  ```
+</Accordion>
+
+## Example: S3 Export with Partitioning
+
+```python
+from mage_ai.settings.repo import get_repo_path
+from mage_ai.io.config import ConfigFileLoader
+from pandas import DataFrame
+import os
+
+if 'data_exporter' not in globals():
+    from mage_ai.data_preparation.decorators import data_exporter
+
+@data_exporter
+def export_to_s3(df: DataFrame, **kwargs) -> None:
+    """
+    Export data to S3 in Parquet format with date partitioning.
+    """
+    config_path = os.path.join(get_repo_path(), 'io_config.yaml')
+    config_profile = 'default'
+
+    # Ensure date column exists for partitioning
+    if 'event_date' not in df.columns:
+        df['event_date'] = pd.to_datetime('today').date()
+    
+    from mage_integrations.destinations.amazon_s3 import AmazonS3
+    
+    config = {
+        'bucket': 'my-data-lake',
+        'object_key_path': 'raw/events',
+        'table': 'user_events',
+        'file_type': 'parquet',
+        'date_partition_format': '%Y/%m/%d',
+        'aws_access_key_id': os.environ.get('AWS_ACCESS_KEY_ID'),
+        'aws_secret_access_key': os.environ.get('AWS_SECRET_ACCESS_KEY'),
+        'aws_region': 'us-west-2',
+    }
+    
+    destination = AmazonS3(config=config, batch_processing=True)
+    # Export is handled by Mage pipeline
+```
+
+## Testing Connections
+
+```python
+# Test S3 connection
+from mage_integrations.destinations.amazon_s3 import AmazonS3
+
+config = {'bucket': 'my-bucket', 'aws_access_key_id': '...', 'aws_secret_access_key': '...', 'aws_region': 'us-west-2'}
+s3 = AmazonS3(config=config)
+try:
+    s3.test_connection()
+    print('S3 connection successful')
+except Exception as e:
+    print(f'Connection failed: {e}')
+
+# Test GCS connection
+from mage_integrations.destinations.google_cloud_storage import GoogleCloudStorage
+
+config = {'bucket': 'my-bucket', 'google_application_credentials': '/path/to/key.json'}
+gcs = GoogleCloudStorage(config=config)
+try:
+    gcs.test_connection()
+    print('GCS connection successful')
+except Exception as e:
+    print(f'Connection failed: {e}')
+```
+
+## Common Issues
+
+<Accordion title="S3 Permission Errors">
+  Ensure IAM user/role has:
+  ```json
+  {
+    "Effect": "Allow",
+    "Action": [
+      "s3:PutObject",
+      "s3:GetObject",
+      "s3:ListBucket"
+    ],
+    "Resource": [
+      "arn:aws:s3:::my-bucket",
+      "arn:aws:s3:::my-bucket/*"
+    ]
+  }
+  ```
+</Accordion>
+
+<Accordion title="GCS Permission Errors">
+  Grant service account roles:
+  - `roles/storage.objectCreator` - Write access
+  - `roles/storage.objectViewer` - Read access (for testing)
+  
+  Or custom IAM permissions:
+  - `storage.objects.create`
+  - `storage.objects.get`
+  - `storage.buckets.get`
+</Accordion>
+
+<Accordion title="Delta Lake Region Errors">
+  **Error**: "Received redirect without LOCATION"
+  
+  **Cause**: AWS region mismatch
+  
+  **Solution**: Ensure `aws_region` matches S3 bucket region:
+  ```yaml
+  aws_region: us-west-2  # Must match bucket region
+  ```
+</Accordion>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Streaming Destinations" icon="bolt" href="/integrations/destinations/streaming">
+    Learn about Kafka and real-time data export
+  </Card>
+  <Card title="Data Warehouses" icon="warehouse" href="/integrations/destinations/data-warehouses">
+    Configure BigQuery, Snowflake, and Redshift
+  </Card>
+</CardGroup>

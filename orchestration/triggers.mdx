@@ -1,0 +1,513 @@
+---
+title: "Triggers"
+description: "Configure schedule, event, and API triggers for your pipelines"
+---
+
+Triggers define when and how your pipelines execute. Mage supports three types of triggers: time-based schedules, event-based triggers, and API triggers.
+
+## Trigger Configuration File
+
+Triggers are stored in `pipelines/[pipeline_uuid]/triggers.yaml`:
+
+```yaml
+triggers:
+  - name: daily_trigger
+    schedule_type: time
+    start_time: 2024-01-01 00:00:00
+    schedule_interval: '@daily'
+    status: active
+    variables:
+      env: production
+    sla: 3600  # 1 hour in seconds
+    settings:
+      skip_if_previous_running: true
+      allow_blocks_to_fail: false
+```
+
+## Time-Based Triggers
+
+Time triggers execute pipelines on a schedule using cron expressions or predefined intervals.
+
+### Predefined Intervals
+
+<CodeGroup>
+```yaml Once
+triggers:
+  - name: run_once
+    schedule_type: time
+    schedule_interval: '@once'
+    start_time: 2024-01-01 12:00:00
+    status: active
+```
+
+```yaml Hourly
+triggers:
+  - name: hourly_sync
+    schedule_type: time
+    schedule_interval: '@hourly'
+    start_time: 2024-01-01 00:00:00
+    status: active
+```
+
+```yaml Daily
+triggers:
+  - name: daily_etl
+    schedule_type: time
+    schedule_interval: '@daily'
+    start_time: 2024-01-01 00:00:00
+    status: active
+```
+
+```yaml Weekly
+triggers:
+  - name: weekly_report
+    schedule_type: time
+    schedule_interval: '@weekly'
+    start_time: 2024-01-01 00:00:00
+    status: active
+```
+
+```yaml Monthly
+triggers:
+  - name: monthly_rollup
+    schedule_type: time
+    schedule_interval: '@monthly'
+    start_time: 2024-01-01 00:00:00
+    status: active
+```
+
+```yaml Always On
+triggers:
+  - name: streaming_pipeline
+    schedule_type: time
+    schedule_interval: '@always_on'
+    status: active
+```
+</CodeGroup>
+
+### Cron Expressions
+
+Use standard cron syntax for custom schedules:
+
+```yaml
+triggers:
+  # Every 15 minutes
+  - name: frequent_sync
+    schedule_type: time
+    schedule_interval: '*/15 * * * *'
+    status: active
+
+  # Every weekday at 9 AM
+  - name: weekday_morning
+    schedule_type: time
+    schedule_interval: '0 9 * * 1-5'
+    status: active
+
+  # First day of month at midnight
+  - name: monthly_start
+    schedule_type: time
+    schedule_interval: '0 0 1 * *'
+    status: active
+
+  # Every 6 hours
+  - name: every_six_hours
+    schedule_type: time
+    schedule_interval: '0 */6 * * *'
+    status: active
+```
+
+### Cron Format
+
+```
+┌───────────── minute (0 - 59)
+│ ┌───────────── hour (0 - 23)
+│ │ ┌───────────── day of the month (1 - 31)
+│ │ │ ┌───────────── month (1 - 12)
+│ │ │ │ ┌───────────── day of the week (0 - 6) (Sunday to Saturday)
+│ │ │ │ │
+│ │ │ │ │
+* * * * *
+```
+
+<Tip>
+Test your cron expressions at [crontab.guru](https://crontab.guru) before deploying.
+</Tip>
+
+## Event-Based Triggers
+
+Event triggers execute pipelines in response to external events.
+
+### AWS EventBridge
+
+Trigger pipelines from AWS events:
+
+```yaml
+triggers:
+  - name: s3_upload_trigger
+    schedule_type: event
+    status: active
+    variables:
+      event_source: aws
+```
+
+### Event Matcher Configuration
+
+Event matchers define patterns to match incoming events:
+
+```python
+from mage_ai.orchestration.db.models.schedules import EventMatcher
+
+# Create event matcher for S3 uploads
+event_matcher = EventMatcher.create(
+    name='s3_file_uploaded',
+    event_type=EventMatcher.EventType.AWS_EVENT,
+    pattern={
+        'source': ['aws.s3'],
+        'detail-type': ['Object Created'],
+        'detail': {
+            'bucket': {
+                'name': ['my-bucket']
+            },
+            'object': {
+                'key': [{'prefix': 'uploads/'}]
+            }
+        }
+    }
+)
+```
+
+### Event Pattern Matching
+
+The event matcher checks if incoming events match the defined pattern:
+
+<Tabs>
+  <Tab title="S3 Object Created">
+    ```python
+    pattern = {
+        'source': ['aws.s3'],
+        'detail-type': ['Object Created'],
+        'detail': {
+            'bucket': {'name': ['my-data-bucket']},
+            'object': {'key': [{'prefix': 'input/'}]}
+        }
+    }
+    ```
+  </Tab>
+  
+  <Tab title="EC2 State Change">
+    ```python
+    pattern = {
+        'source': ['aws.ec2'],
+        'detail-type': ['EC2 Instance State-change Notification'],
+        'detail': {
+            'state': ['running']
+        }
+    }
+    ```
+  </Tab>
+  
+  <Tab title="CloudWatch Alarm">
+    ```python
+    pattern = {
+        'source': ['aws.cloudwatch'],
+        'detail-type': ['CloudWatch Alarm State Change'],
+        'detail': {
+            'state': {'value': ['ALARM']}
+        }
+    }
+    ```
+  </Tab>
+</Tabs>
+
+## API Triggers
+
+API triggers allow you to execute pipelines programmatically.
+
+### Using the trigger_pipeline Function
+
+```python
+from mage_ai.orchestration.triggers.api import trigger_pipeline
+
+# Basic trigger
+pipeline_run = trigger_pipeline(
+    pipeline_uuid='my_pipeline',
+)
+
+# With variables
+pipeline_run = trigger_pipeline(
+    pipeline_uuid='my_pipeline',
+    variables={
+        'env': 'production',
+        'date': '2024-01-01',
+    },
+)
+
+# Wait for completion
+pipeline_run = trigger_pipeline(
+    pipeline_uuid='my_pipeline',
+    check_status=True,
+    poll_interval=60,  # seconds
+    poll_timeout=3600,  # 1 hour
+    error_on_failure=True,
+)
+```
+
+### From Another Pipeline
+
+Trigger downstream pipelines from a data exporter block:
+
+```python
+from mage_ai.orchestration.triggers.api import trigger_pipeline
+
+if 'data_exporter' not in globals():
+    from mage_ai.data_preparation.decorators import data_exporter
+
+@data_exporter
+def export_and_trigger(*args, **kwargs):
+    """
+    Export data and trigger downstream pipeline
+    """
+    # Your export logic here
+    # ...
+    
+    # Trigger the next pipeline
+    execution_date = kwargs.get('execution_date')
+    
+    pipeline_run = trigger_pipeline(
+        'downstream_pipeline',
+        variables={
+            'upstream_date': str(execution_date),
+            'source': 'upstream_pipeline',
+        },
+    )
+    
+    return {'triggered_run_id': pipeline_run.id}
+```
+
+### Via REST API
+
+Trigger pipelines using the Mage REST API:
+
+```bash
+curl -X POST "http://localhost:6789/api/pipeline_schedules/[schedule_id]/pipeline_runs" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "pipeline_run": {
+      "variables": {
+        "env": "production"
+      }
+    }
+  }'
+```
+
+## Trigger Settings
+
+Configure trigger behavior with settings:
+
+```yaml
+triggers:
+  - name: production_pipeline
+    schedule_type: time
+    schedule_interval: '@daily'
+    status: active
+    sla: 7200  # 2 hours
+    settings:
+      # Prevent overlapping runs
+      skip_if_previous_running: true
+      
+      # Continue even if some blocks fail
+      allow_blocks_to_fail: false
+      
+      # Create run immediately when enabled
+      create_initial_pipeline_run: true
+      
+      # Adjust timing for consistent completion time
+      landing_time_enabled: false
+      
+      # Limit concurrent runs
+      pipeline_run_limit: 3
+      
+      # Timeout after 1 hour
+      timeout: 3600
+      
+      # Status to set on timeout
+      timeout_status: failed
+```
+
+### Setting Descriptions
+
+<ParamField path="skip_if_previous_running" type="boolean" default={false}>
+  Skip creating new runs if a previous run is still executing. Useful for long-running pipelines to prevent queuing.
+</ParamField>
+
+<ParamField path="allow_blocks_to_fail" type="boolean" default={false}>
+  Allow the pipeline to continue executing downstream blocks even if upstream blocks fail.
+</ParamField>
+
+<ParamField path="create_initial_pipeline_run" type="boolean" default={false}>
+  Immediately create a pipeline run when the trigger is first enabled, regardless of schedule.
+</ParamField>
+
+<ParamField path="landing_time_enabled" type="boolean" default={false}>
+  Adjust execution start time based on historical runtime to ensure consistent completion time.
+</ParamField>
+
+<ParamField path="pipeline_run_limit" type="integer">
+  Maximum number of concurrent pipeline runs. Additional runs will be cancelled.
+</ParamField>
+
+<ParamField path="timeout" type="integer">
+  Maximum execution time in seconds. Pipeline run will be stopped if exceeded.
+</ParamField>
+
+<ParamField path="timeout_status" type="string">
+  Status to set when timeout is reached (e.g., 'failed', 'cancelled').
+</ParamField>
+
+## Runtime Variables
+
+Pass variables to pipeline runs at execution time:
+
+```yaml
+triggers:
+  - name: parameterized_pipeline
+    schedule_type: time
+    schedule_interval: '@daily'
+    status: active
+    variables:
+      env: production
+      region: us-west-2
+      batch_size: 1000
+```
+
+Access variables in your pipeline blocks:
+
+```python
+@data_loader
+def load_data(*args, **kwargs):
+    env = kwargs.get('env', 'development')
+    region = kwargs.get('region', 'us-east-1')
+    batch_size = kwargs.get('batch_size', 100)
+    
+    print(f"Running in {env} environment")
+    print(f"Region: {region}")
+    print(f"Batch size: {batch_size}")
+    
+    # Your loading logic
+    return data
+```
+
+## Execution Date Variables
+
+Mage automatically provides date/time variables for each run:
+
+```python
+@data_loader
+def load_data(*args, **kwargs):
+    # Execution date for this run
+    execution_date = kwargs['execution_date']
+    
+    # Date string (YYYY-MM-DD)
+    ds = kwargs.get('ds')
+    
+    # Hour (HH)
+    hr = kwargs.get('hr')
+    
+    # Interval boundaries (for backfills)
+    interval_start = kwargs.get('interval_start_datetime')
+    interval_end = kwargs.get('interval_end_datetime')
+    interval_seconds = kwargs.get('interval_seconds')
+    
+    print(f"Processing data for {ds} hour {hr}")
+    return data
+```
+
+## Multiple Triggers
+
+A pipeline can have multiple triggers:
+
+```yaml
+triggers:
+  # Daily scheduled run
+  - name: daily_scheduled
+    schedule_type: time
+    schedule_interval: '@daily'
+    start_time: 2024-01-01 00:00:00
+    status: active
+    variables:
+      run_type: scheduled
+
+  # Hourly during business hours
+  - name: business_hours
+    schedule_type: time
+    schedule_interval: '0 9-17 * * 1-5'
+    status: active
+    variables:
+      run_type: business_hours
+
+  # Event-based trigger
+  - name: data_arrival
+    schedule_type: event
+    status: active
+    variables:
+      run_type: event_driven
+
+  # Manual/API trigger
+  - name: manual_run
+    schedule_type: api
+    status: active
+    variables:
+      run_type: manual
+```
+
+## SLA Configuration
+
+Set Service Level Agreement timeouts to monitor pipeline performance:
+
+```yaml
+triggers:
+  - name: sla_monitored
+    schedule_type: time
+    schedule_interval: '@hourly'
+    status: active
+    sla: 1800  # 30 minutes
+```
+
+When a pipeline run exceeds its SLA:
+- The `passed_sla` flag is set to `true`
+- Notifications are sent (if configured)
+- The run continues executing unless a timeout is also set
+
+<Warning>
+SLA is different from timeout. SLA tracks when a pipeline should complete but doesn't stop execution. Timeout stops execution after the specified duration.
+</Warning>
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Use descriptive trigger names">
+    Name triggers clearly to indicate their purpose: `daily_user_etl`, `hourly_sync`, `s3_upload_handler`.
+  </Accordion>
+  
+  <Accordion title="Set appropriate SLAs">
+    Monitor pipeline performance with SLAs. Set them slightly above your expected runtime to catch degradation.
+  </Accordion>
+  
+  <Accordion title="Prevent overlapping runs">
+    Use `skip_if_previous_running: true` for long-running pipelines to prevent resource contention.
+  </Accordion>
+  
+  <Accordion title="Use landing time for consistency">
+    Enable `landing_time_enabled` when you need pipelines to complete by a specific time, accounting for varying runtime.
+  </Accordion>
+  
+  <Accordion title="Limit concurrent runs">
+    Set `pipeline_run_limit` to prevent resource exhaustion from too many simultaneous runs.
+  </Accordion>
+</AccordionGroup>
+
+## Next Steps
+
+<Card title="Sensors" icon="tower-broadcast" href="/orchestration/sensors">
+  Learn how to use sensors to wait for external conditions before executing your pipeline.
+</Card>
